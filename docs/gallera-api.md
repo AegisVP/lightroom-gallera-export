@@ -7,7 +7,11 @@ Gallera has no public API. This document comes from HAR captures of the app.gall
 - Base URL: `https://api.gallera.io/api/`
 - Request headers: `Accept: application/json`, `X-Requested-With: XMLHttpRequest`, `Authorization: Bearer <token>`, and `Content-Type: application/json` for JSON bodies.
 - Every response is wrapped: `{"status": "success", "message": "...", "data": ..., "count"?: n}`. Check `status`, not only the HTTP code.
-- Errors use the same wrapper. The one captured: HTTP 404, `{"status": "notFound", "message": "No query results for model [App\\Models\\Gallery].", "data": {"message": ...}}`. The backend is Laravel. Other error statuses (401, 422 validation) haven't been captured yet.
+- Errors use the same wrapper. The backend is Laravel. Captured so far:
+  - HTTP 404, `{"status": "notFound", "message": "No query results for model [App\\Models\\Gallery].", "data": {"message": ...}}`.
+  - HTTP **403**, `{"status": "auth", "message": "Unauthenticated."}` for a revoked or invalid token (seen from the Lightroom spikes, 2026-10-30). Not 401.
+  - 422 (validation) hasn't been captured yet.
+- `message` is **localized** to the account's language (e.g. login success came back as "Авторизація успішна"). Branch on `status` and the HTTP code, never on `message`.
 - Galleries have two identifiers:
   - `id` (numeric, never changes)
   - `slug` (used in most URLs). **The user can change the slug at any time** (observed: `new-gallery` → `new-gallery2`). Store `id` and look up the current `slug` before any slug-based call.
@@ -20,7 +24,7 @@ Gallera has no public API. This document comes from HAR captures of the app.gall
 ```
 → `data.token`, `data.user` (`id`, `username`, `storage.used`/`storage.limit` in bytes, `subscription_type`, `google_id`, `has_password`).
 
-- The token looks like a Laravel Sanctum token (`<id>|<secret>`). No expiry was observed. If any call returns 401, log in again.
+- The token looks like a Laravel Sanctum token (`<id>|<secret>`). No expiry was observed. If any call returns `status: "auth"` (HTTP 403, possibly 401), log in again.
 - `POST auth/logout` (no body) revokes the token.
 - `GET user` returns the same user object (useful for validating a stored token).
 - Accounts created through Google sign-in may have `has_password: false`, and email/password login won't work for them.
@@ -93,12 +97,17 @@ Read-only fields of interest: `id`, `public_url` (e.g. `https://<username>.galle
 2. `PUT <data.url>` with the raw file bytes as the body and `Content-Type: <filetype>`. **Do not send the `Authorization` header** to R2. → 200 with an empty body.
 3. `POST photos/upload/{id}/uploaded` with `{"photo": <id>}` → success.
 
-Optional: poll `POST photos/processed` with `{"photo_ids": [ids]}`. It returns photos whose processing has finished (`is_compressing: false`, with `preview_url`, `image_url` filled in). It returns an empty `data` while they are still processing.
+Optional: poll `POST photos/processed` with `{"photo_ids": [ids]}`. It returns photos whose processing has finished (`is_compressing: false`, with `preview_url`, `image_url` filled in). It returns an empty `data` while they are still processing. An 11 MB JPEG took about 5 s.
+
+Verified from Lightroom (`LrHttp`, Windows) on 2026-10-30: the PUT works with the body as one string or as a chunked function body; 11.3 MB took 2.3 s. After processing, the photo's `filesize` equals the uploaded byte count. That's the check that the upload is complete.
 
 The web UI also calls `POST analytics/uploading`. That call isn't needed.
 
 ### List
 `GET photos/{slug}` → `data[]` photo objects: `id`, `original_filename`, `filesize`, `preview_mini_url`, `preview_url`, `image_url`, `is_compressing`, `is_hidden_by_client`, `order_number`, `gallery_id`, `deleted_at`.
+
+- `filesize` is the size of the uploaded original.
+- `image_url` is **not** the original: it's a re-encoded display copy, at most 1920 px on the long edge, about JPEG quality 90 (a 6048 px, 11 MB upload came back as 1920 px, 493 KB). No URL for the original has been seen.
 
 ### Delete
 `POST photos/delete`
