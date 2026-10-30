@@ -9,7 +9,12 @@ local Log = require 'Log'
 
 local Auth = {}
 
+-- Short texts for lists and status lines (Lightroom truncates long failure messages).
 Auth.LOGIN_MESSAGE = 'Log in to Gallera in the service settings.'
+Auth.EXPIRED_MESSAGE = 'Your Gallera login expired. Log in again in the service settings.'
+-- Descriptive texts for the dialog that asks the user to log in.
+Auth.LOGIN_HELP = 'Not logged in to Gallera. Right-click the Gallera publish service, choose Edit Settings…, and log in.'
+Auth.EXPIRED_HELP = 'Your Gallera login expired. Right-click the Gallera publish service, choose Edit Settings…, and log in again.'
 
 local function key(email)
 	return 'gallera.token:' .. email:lower():gsub('^%s+', ''):gsub('%s+$', '')

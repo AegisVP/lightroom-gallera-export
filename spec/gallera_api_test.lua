@@ -92,6 +92,22 @@ function TestGalleraApi:testGetRetriesOnceOnNetwork()
 	lu.assertEquals(#fake.requests, 2)
 end
 
+function TestGalleraApi:testNoHttpStatusIsANetworkFailure()
+	-- Offline, LrHttp returns a body but no HTTP status (seen in Lightroom: "HTTP 0").
+	self.fake:respond(0, '')
+	local r, err = self.api:createGallery { name = 'a', date = '2026-10-30' }
+	lu.assertNil(r)
+	lu.assertEquals(err.kind, 'network')
+	lu.assertEquals(#self.fake.requests, 1)
+end
+
+function TestGalleraApi:testGetRetriesOnceWhenThereIsNoHttpStatus()
+	self.fake:respond(0, '')
+	self.fake:respond(200, ok { username = 'u' })
+	lu.assertEquals(self.api:getUser().username, 'u')
+	lu.assertEquals(#self.fake.requests, 2)
+end
+
 function TestGalleraApi:testPostIsNotRetried()
 	self.fake:failNetwork('timeout')
 	local r, err = self.api:createGallery { name = 'a', date = '2026-10-30' }

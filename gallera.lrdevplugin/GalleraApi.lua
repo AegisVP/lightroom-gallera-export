@@ -71,12 +71,22 @@ function GalleraApi:call(method, path, bodyTable)
 	return self:send(req)
 end
 
+-- One request through the adapter. A response without a real HTTP status counts as a transport failure:
+-- offline, LrHttp returns a body but no status (seen in Lightroom as "HTTP 0").
+function GalleraApi:transport(req)
+	local resp, networkMessage = self.http.request(req)
+	if resp and not ((tonumber(resp.status) or 0) > 0) then
+		return nil, networkMessage or 'No response from the server'
+	end
+	return resp, networkMessage
+end
+
 -- Only GET retries, once, and only on a transport failure.
 function GalleraApi:send(req)
 	local attempts = req.method == 'GET' and 2 or 1
 	local resp, networkMessage
 	for _ = 1, attempts do
-		resp, networkMessage = self.http.request(req)
+		resp, networkMessage = self:transport(req)
 		if resp then break end
 	end
 	if not resp then return fail('network', nil, networkMessage or 'network error') end
@@ -217,7 +227,7 @@ end
 -- Upload step 2: PUT the bytes to R2. Only Content-Type is sent: no Authorization, no JSON envelope.
 -- A rejected PUT (e.g. 403 for an expired URL) is 'api', not 'auth': the login is fine, the URL isn't.
 function GalleraApi:putFile(url, bytes, contentType)
-	local resp, networkMessage = self.http.request {
+	local resp, networkMessage = self:transport {
 		method = 'PUT',
 		url = url,
 		headers = { ['Content-Type'] = contentType },

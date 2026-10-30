@@ -18,7 +18,7 @@ local function gb(bytes)
 end
 
 local function accountText(propertyTable, user)
-	local text = 'Logged in as ' .. tostring(propertyTable.username)
+	local text = 'Logged in as ' .. (propertyTable.ui_username or '…')
 	local storage = user and user.storage
 	if type(storage) == 'table' then
 		local limit = tonumber(storage.limit)
@@ -48,7 +48,7 @@ local function refreshAccount(propertyTable)
 		if not api then return end
 		local user, err = api:getUser()
 		if user then
-			if type(user.username) == 'string' then propertyTable.username = user.username end
+			if type(user.username) == 'string' then propertyTable.ui_username = user.username end
 			showLoggedIn(propertyTable, user)
 		elseif err.kind == 'auth' then
 			Auth.clear(propertyTable.email)
@@ -113,7 +113,7 @@ local function logIn(propertyTable)
 		if user.has_password == false then
 			LrDialogs.message('Gallera', 'This Gallera account has no password. Set one on the website first.', 'info')
 		end
-		propertyTable.username = type(user.username) == 'string' and user.username or ''
+		propertyTable.ui_username = type(user.username) == 'string' and user.username or ''
 		showLoggedIn(propertyTable, user)
 	end)
 end
@@ -122,7 +122,7 @@ local function logOut(propertyTable)
 	LrTasks.startAsyncTask(function()
 		propertyTable.ui_message = 'Logging out…'
 		Auth.logout(propertyTable.email)
-		propertyTable.username = ''
+		propertyTable.ui_username = ''
 		showLoggedOut(propertyTable)
 	end)
 end

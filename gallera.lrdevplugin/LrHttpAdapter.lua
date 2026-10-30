@@ -34,13 +34,14 @@ function LrHttpAdapter.request(req)
 			req.method == 'PUT' and PUT_TIMEOUT or TIMEOUT)
 	end
 	local elapsed = string.format('%.2fs', LrDate.currentTime() - t0)
-	if body == nil then
+	local status = headers and tonumber(headers.status) or 0
+	-- Offline, LrHttp may return a body with no HTTP status (seen with postMultipart), not just a nil body.
+	if body == nil or status <= 0 then
 		local e = headers and headers.error
 		local message = (e and e.name) or 'network error'
 		Log.warn(req.method, shortUrl(req.url), '-> network error', message, elapsed)
 		return nil, message
 	end
-	local status = headers and tonumber(headers.status) or 0
 	Log.info(req.method, shortUrl(req.url), '-> HTTP', status, elapsed)
 	return { status = status, body = body }
 end

@@ -57,6 +57,20 @@ function TestGalleraApiPhotos:testPutFileNetworkFailureIsNetworkAndNotRetried()
 	lu.assertEquals(#self.fake.requests, 1)
 end
 
+function TestGalleraApiPhotos:testPutFileWithoutHttpStatusIsNetwork()
+	self.fake:respond(0, '')
+	local r, err = self.api:putFile('https://r2/u', 'BYTES', 'image/jpeg')
+	lu.assertNil(r)
+	lu.assertEquals(err.kind, 'network')
+end
+
+function TestGalleraApiPhotos:testRequestUploadWithoutHttpStatusIsNetwork()
+	self.fake:respond(0, '')
+	local r, err = self.api:requestUpload { galleryId = 1, filename = 'a.jpg', filesize = 1, filetype = 'image/jpeg' }
+	lu.assertNil(r)
+	lu.assertEquals(err.kind, 'network')
+end
+
 function TestGalleraApiPhotos:testConfirmUpload()
 	self.fake:respond(200, ok {})
 	lu.assertEquals(self.api:confirmUpload(140466391), true)

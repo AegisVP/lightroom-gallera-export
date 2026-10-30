@@ -17,7 +17,6 @@ local Log = require 'Log'
 
 local CollectionSettingsDialog = {}
 
-local AUTH_MESSAGE = 'Your Gallera login expired. Log in again in the service settings.'
 local DEFAULT_LONG_EDGE = 2048
 local DEFAULT_QUALITY = 80
 
@@ -28,7 +27,7 @@ local session
 local function gkey(key) return 'g_' .. key end
 
 local function errorText(err)
-	if err and err.kind == 'auth' then return AUTH_MESSAGE end
+	if err and err.kind == 'auth' then return Auth.EXPIRED_MESSAGE end
 	return 'Gallera: ' .. tostring(err and err.message or 'unknown error')
 end
 

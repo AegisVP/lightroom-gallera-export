@@ -2,7 +2,7 @@
 local LrPathUtils = import 'LrPathUtils'
 
 local CollectionSettingsDialog = require 'CollectionSettingsDialog'
-local Log = require 'Log'
+local Publish = require 'Publish'
 local ServiceSettingsDialog = require 'ServiceSettingsDialog'
 
 local provider = {
@@ -15,7 +15,6 @@ local provider = {
 	-- Saved in plain text in presets: never a token or password here.
 	exportPresetFields = {
 		{ key = 'email', default = '' },
-		{ key = 'username', default = '' },
 		{ key = 'jpegHandling', default = 'ask' },   -- 'ask' | 'keep' | 'remove' (D24)
 		{ key = 'jpegFolder', default = LrPathUtils.child(LrPathUtils.getStandardFilePath('pictures'), 'Gallera') },
 	},
@@ -41,11 +40,6 @@ function provider.getCollectionBehaviorInfo(publishSettings)
 	}
 end
 
-function provider.processRenderedPhotos(functionContext, exportContext)
-	Log.info('processRenderedPhotos: not implemented yet')
-	for _, rendition in exportContext:renditions() do
-		rendition:uploadFailed('Not implemented yet')
-	end
-end
+provider.processRenderedPhotos = Publish.process
 
 return provider
