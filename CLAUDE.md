@@ -8,7 +8,8 @@ An Adobe Lightroom Classic plugin that exports finished photos to app.gallera.io
 
 ## Lightroom SDK constraints
 
-- The plugin is developed on macOS but **runs in Lightroom Classic on Windows**. Build paths with `LrPathUtils` and avoid shell commands and macOS-only features.
+- The plugin is developed and run in **Lightroom Classic on Windows**. Build paths with `LrPathUtils` and avoid shell commands.
+- The design is in @docs/superpowers/specs/2026-10-30-gallera-publish-plugin-design.md. Core modules (`GalleraApi`, `GallerySettings`, `GalleryLookup`, `FavoritesSync`, `PhotoOrder`) must not import Lightroom namespaces, so they stay unit-testable with plain Lua 5.1.
 - The plugin runs on Lightroom's embedded **Lua 5.1**. There is no LuaRocks, no C modules, no `goto` and no integer division (`//`). Use `import 'LrHttp'` (etc.) for SDK namespaces and `require` only for `.lua` files inside the plugin folder.
 - The plugin is a **Publish service**: registered under `LrExportServiceProvider` in `Info.lua` with `supportsIncrementalPublish = 'only'`. Each published collection maps to one Gallera gallery. Record the Gallera photo id on each rendition so deletes and re-publishes can find it.
 - All network calls (`LrHttp.get`/`post`/`postMultipart`) must run inside `LrTasks.startAsyncTask` or an export task. Calling them on the UI thread fails or blocks Lightroom.
