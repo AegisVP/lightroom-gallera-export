@@ -113,9 +113,15 @@ gallera.lrdevplugin/
   FavoritesSync.lua
   PhotoOrder.lua
   Fingerprint.lua                -- D30: stable hash of the inputs that shape the rendered pixels
+  Redact.lua                     -- masks secrets before logging (§8)
+  Names.lua                      -- deleted marker, Windows-safe folder names, kept-JPEG names (D27)
+  Uploader.lua                   -- one photo's 3-step upload with D25 retries
+  PublishPlan.lua                -- classify (D30/D31), storage estimate (D23), confirmed deletes
   -- Lightroom layer
   LrHttpAdapter.lua
   Auth.lua
+  CollectionStore.lua            -- reads/merges plugin-owned collection settings
+  Publish.lua                    -- processRenderedPhotos (§6.4)
   GalleraMetadata.lua            -- LrMetadataProvider: hidden plugin field(s)
   PublishServiceProvider.lua
   ServiceSettingsDialog.lua
