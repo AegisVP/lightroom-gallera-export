@@ -161,4 +161,107 @@ function GalleraApi:restoreGallery(slug)
 	return true
 end
 
+-- Moves an ACTIVE gallery to the trash. DELETE on a trashed gallery deletes it permanently, so this
+-- looks the id up first, refuses anything not active, and never retries (CLAUDE.md, DESIGN.md §5.2).
+-- No function here deletes a gallery permanently.
+function GalleraApi:trashGallery(galleryId)
+	local galleries, err = self:listGalleries()
+	if not galleries then return nil, err end
+	local slug
+	for _, g in ipairs(galleries) do
+		if tonumber(g.id) == tonumber(galleryId) then slug = g.slug end
+	end
+	if not slug then
+		return fail('api', nil, 'The gallery is not active on Gallera; it was not deleted.')
+	end
+	local _, deleteErr = self:call('DELETE', 'galleries/' .. slug .. '/delete')
+	if deleteErr then return nil, deleteErr end
+	return true
+end
+
+-- Photos ----------------------------------------------------------------------
+
+-- Photo objects in gallery order, without photos that have a deleted_at.
+function GalleraApi:listPhotos(slug)
+	local data, err = self:call('GET', 'photos/' .. slug)
+	if type(data) ~= 'table' then return unexpected(err) end
+	local photos = {}
+	for _, p in ipairs(data) do
+		if p.deleted_at == nil or p.deleted_at == json.null then photos[#photos + 1] = p end
+	end
+	return photos
+end
+
+-- Whole numbers as plain digits ('%d' overflows 32-bit longs on Windows; tostring can give 1e+15).
+local function digits(n)
+	return string.format('%.0f', n)
+end
+
+-- Upload step 1: a signed R2 URL (expires in 20 min) and the new photo's id.
+function GalleraApi:requestUpload(opts)
+	local data, err = self:send {
+		method = 'POST',
+		url = GalleraApi.BASE_URL .. 'photos/upload/url',
+		headers = self:headers(false),
+		multipart = {
+			{ name = 'gallery', value = digits(opts.galleryId) },
+			{ name = 'filename', value = opts.filename },
+			{ name = 'filesize', value = digits(opts.filesize) },
+			{ name = 'filetype', value = opts.filetype },
+		},
+	}
+	if type(data) ~= 'table' or type(data.photo) ~= 'table' then return unexpected(err) end
+	return { url = data.url, photoId = data.photo.id }
+end
+
+-- Upload step 2: PUT the bytes to R2. Only Content-Type is sent: no Authorization, no JSON envelope.
+-- A rejected PUT (e.g. 403 for an expired URL) is 'api', not 'auth': the login is fine, the URL isn't.
+function GalleraApi:putFile(url, bytes, contentType)
+	local resp, networkMessage = self.http.request {
+		method = 'PUT',
+		url = url,
+		headers = { ['Content-Type'] = contentType },
+		body = bytes,
+	}
+	if not resp then return fail('network', nil, networkMessage or 'network error') end
+	if resp.status >= 200 and resp.status < 300 then return true end
+	local code = resp.body and resp.body:match('<Code>(.-)</Code>')
+	return fail('api', resp.status, 'Upload rejected: HTTP ' .. tostring(resp.status) .. (code and (' ' .. code) or ''))
+end
+
+-- Upload step 3.
+function GalleraApi:confirmUpload(photoId)
+	local _, err = self:call('POST', 'photos/upload/' .. digits(photoId) .. '/uploaded', { photo = photoId })
+	if err then return nil, err end
+	return true
+end
+
+-- Returns the ids Gallera reports as deleted. Never retried (DESIGN.md §8).
+function GalleraApi:deletePhotos(slug, ids)
+	local data, err = self:call('POST', 'photos/delete', { gallery = slug, photos = ids })
+	if type(data) ~= 'table' then return unexpected(err) end
+	return data
+end
+
+-- ids must be the COMPLETE list of the gallery's photos. folderId is nil for the whole gallery.
+function GalleraApi:sortPhotos(slug, ids, folderId)
+	local _, err = self:call('POST', 'photos/sort', {
+		sorted = ids,
+		gallery = slug,
+		folder = folderId == nil and json.null or folderId,
+		type = 'manual',
+	})
+	if err then return nil, err end
+	return true
+end
+
+-- Favorites -------------------------------------------------------------------
+
+-- One entry per client favorites list (id, title, is_finished, items_count, latest[], lightroom_list[]).
+function GalleraApi:getFavorites(slug)
+	local data, err = self:call('GET', 'galleries/' .. slug .. '/favorites')
+	if type(data) ~= 'table' then return unexpected(err) end
+	return data
+end
+
 return GalleraApi
