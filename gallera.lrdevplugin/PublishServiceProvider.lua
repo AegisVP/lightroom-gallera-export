@@ -1,6 +1,7 @@
 --[[ Gallera publish service provider (DESIGN.md §5.3, §6). ]]
 local LrPathUtils = import 'LrPathUtils'
 
+local CollectionSettingsDialog = require 'CollectionSettingsDialog'
 local Log = require 'Log'
 local ServiceSettingsDialog = require 'ServiceSettingsDialog'
 
@@ -21,6 +22,9 @@ local provider = {
 
 	startDialog = ServiceSettingsDialog.startDialog,
 	sectionsForTopOfDialog = ServiceSettingsDialog.sectionsForTopOfDialog,
+
+	viewForCollectionSettings = CollectionSettingsDialog.viewForCollectionSettings,
+	updateCollectionSettings = CollectionSettingsDialog.updateCollectionSettings,
 }
 
 -- D30: metadata never counts as a change; the fingerprint decides what re-uploads.
