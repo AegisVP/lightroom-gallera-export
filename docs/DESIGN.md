@@ -40,7 +40,6 @@ A personal-use Lightroom Classic plugin that publishes finished photos as JPEGs 
 | **Design tab** (cover/title photo, fonts, colors, layout, gradient) | Possibly a future version. The plugin must round-trip `design`/`cover` unchanged. |
 | Matching existing gallery photos to Lightroom photos when linking | Photos already in a linked gallery are left alone. Lightroom only manages photos it uploaded. |
 | Videos, non-JPEG formats | |
-| Following Lightroom's custom sort order | Capture-date order only. |
 | Accounts that sign in only through Google (no password) | Unsupported. |
 
 ## 3. Constraints and facts the design depends on
