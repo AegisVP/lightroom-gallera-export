@@ -6,6 +6,7 @@ local LrDialogs = import 'LrDialogs'
 local LrTasks = import 'LrTasks'
 
 local Auth = require 'Auth'
+local GalleraApi = require 'GalleraApi'
 local CollectionStore = require 'CollectionStore'
 local GalleryLookup = require 'GalleryLookup'
 local Log = require 'Log'
@@ -25,7 +26,7 @@ end
 
 local function errorText(err)
 	if err and err.kind == 'auth' then return Auth.EXPIRED_MESSAGE end
-	return tostring(err and err.message or 'Gallera error')
+	return GalleraApi.userText(err)   -- English; Gallera's own message is in the account's language
 end
 
 -- The collection's `deleted` flag { state, originalName }, or nil.

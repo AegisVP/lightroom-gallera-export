@@ -189,4 +189,14 @@ function PublishPlan.inGallery(ids, galleryPhotos)
 	return out
 end
 
+local JPEG_HANDLING = { ask = true, keep = true, remove = true }
+
+-- D24: the collection's Uploaded JPEGs choice ('ask' | 'keep' | 'remove'), or the service's when the collection
+-- says 'service' (or nothing). Unknown values fall back to 'ask', the default.
+function PublishPlan.jpegHandling(collectionValue, serviceValue)
+	if JPEG_HANDLING[collectionValue] then return collectionValue end
+	if JPEG_HANDLING[serviceValue] then return serviceValue end
+	return 'ask'
+end
+
 return PublishPlan

@@ -6,6 +6,7 @@ local LrPathUtils = import 'LrPathUtils'
 local LrTasks = import 'LrTasks'
 
 local Auth = require 'Auth'
+local GalleraApi = require 'GalleraApi'
 local CollectionSettingsDialog = require 'CollectionSettingsDialog'
 local CollectionStore = require 'CollectionStore'
 local DeletedGallery = require 'DeletedGallery'
@@ -59,7 +60,7 @@ provider.processRenderedPhotos = Publish.process
 
 local function errorText(err)
 	if err and err.kind == 'auth' then return Auth.EXPIRED_MESSAGE end
-	return tostring(err and err.message or 'Gallera error')
+	return GalleraApi.userText(err)   -- English; Gallera's own message is in the account's language
 end
 
 -- Finding the collection -------------------------------------------------------------

@@ -192,3 +192,20 @@ end
 function TestPublishPlan:testInGalleryEmptyGallery()
 	lu.assertEquals(PublishPlan.inGallery({ 5 }, {}), {})
 end
+
+-- Uploaded JPEGs (D24): a collection can override the service setting -------------------------
+
+function TestPublishPlan:testJpegHandlingCollectionWins()
+	lu.assertEquals(PublishPlan.jpegHandling('remove', 'ask'), 'remove')
+	lu.assertEquals(PublishPlan.jpegHandling('keep', 'remove'), 'keep')
+end
+
+function TestPublishPlan:testJpegHandlingFallsBackToService()
+	lu.assertEquals(PublishPlan.jpegHandling(nil, 'keep'), 'keep')
+	lu.assertEquals(PublishPlan.jpegHandling('service', 'remove'), 'remove')
+end
+
+function TestPublishPlan:testJpegHandlingDefaultIsAsk()
+	lu.assertEquals(PublishPlan.jpegHandling(nil, nil), 'ask')
+	lu.assertEquals(PublishPlan.jpegHandling('bogus', 'bogus'), 'ask')
+end

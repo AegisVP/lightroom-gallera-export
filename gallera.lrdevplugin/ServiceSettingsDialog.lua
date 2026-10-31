@@ -7,6 +7,7 @@ local LrTasks = import 'LrTasks'
 local LrView = import 'LrView'
 
 local Auth = require 'Auth'
+local GalleraApi = require 'GalleraApi'
 local GalleryLookup = require 'GalleryLookup'
 local Log = require 'Log'
 
@@ -55,7 +56,7 @@ local function refreshAccount(propertyTable)
 			Auth.clear(propertyTable.email)
 			showLoggedOut(propertyTable, 'Your Gallera login expired. Log in again.')
 		else
-			propertyTable.ui_message = 'Could not reach Gallera: ' .. tostring(err.message)
+			propertyTable.ui_message = GalleraApi.userText(err)
 		end
 	end)
 end
@@ -150,11 +151,16 @@ local function logIn(propertyTable)
 		local user, err = Auth.login(email, password)
 		password = nil
 		if not user then
-			local message = tostring(err and err.message)
-			propertyTable.ui_message = 'Login failed: ' .. message
-			if err and (err.kind == 'auth' or err.kind == 'api') then
-				message = message .. '\n\nIf you sign in to Gallera with Google, this Gallera account has no password. Set one on the website first.'
+			-- Gallera's own message is in the account's language; it's in the log, the user gets English text.
+			local message
+			if err and err.kind == 'network' then
+				message = "Gallera can't be reached. Check the internet connection and try again."
+			elseif err and (err.kind == 'auth' or err.status == 422) then
+				message = 'The email or password is wrong.'
+			else
+				message = string.format("Gallera couldn't log you in (HTTP %s). Try again later.", tostring(err and err.status or '?'))
 			end
+			propertyTable.ui_message = ''   -- the dialog below says why; the section shows 'Not logged in'
 			LrDialogs.message('Gallera login failed', message, 'critical')
 			return
 		end

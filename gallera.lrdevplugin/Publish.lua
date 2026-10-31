@@ -14,6 +14,7 @@ local LrTasks = import 'LrTasks'
 local LrView = import 'LrView'
 
 local Auth = require 'Auth'
+local GalleraApi = require 'GalleraApi'
 local CollectionStore = require 'CollectionStore'
 local DeletedGallery = require 'DeletedGallery'
 local Fingerprint = require 'Fingerprint'
@@ -160,7 +161,7 @@ end
 
 local function errorText(err)
 	if err and err.kind == 'auth' then return Auth.EXPIRED_MESSAGE end
-	return tostring(err and err.message or 'Gallera error')
+	return GalleraApi.userText(err)   -- English; Gallera's own message is in the account's language
 end
 
 -- D30 guard: queued photos in client favorites re-upload only if the user checks them here (none checked by
@@ -434,7 +435,9 @@ local function run(exportContext, key)
 
 	local settings = CollectionStore.read(collection)
 	local jpegFiles, fingerprints = settings.jpegFiles or {}, settings.fingerprints or {}
-	local handling = props.jpegHandling or 'ask'
+	-- D24: the collection's Uploaded JPEGs choice, or the service's.
+	local handling = PublishPlan.jpegHandling(settings.jpegHandling, props.jpegHandling)
+	Log.info('publish: uploaded JPEGs', handling)
 	local root = props.jpegFolder
 	if type(root) ~= 'string' or root == '' then
 		root = LrPathUtils.child(LrPathUtils.getStandardFilePath('pictures'), 'Gallera')
@@ -446,6 +449,13 @@ local function run(exportContext, key)
 	local function keepJpeg(path, photoKey, leaf, uploaded)
 		if uploaded and handling == 'remove' then
 			LrFileUtils.delete(path)
+			-- The photo's JPEG from an earlier publish is replaced by this upload, so it goes too (D24).
+			local old = jpegFiles[photoKey]
+			if old and folderOk then
+				LrFileUtils.delete(LrPathUtils.child(folder, old))
+				Log.info('publish: removed the earlier JPEG of an uploaded photo')
+			end
+			jpegFiles[photoKey] = nil
 			return nil
 		end
 		if not folderOk then return nil end
@@ -519,7 +529,9 @@ local function run(exportContext, key)
 				local success, pathOrMessage = rendition:waitForRender()
 				if not success then
 					failed = failed + 1
-					rendition:uploadFailed(tostring(pathOrMessage) .. QUEUED)
+					-- A cancelled publish stops the render without a reason (pathOrMessage is nil).
+					local reason = pathOrMessage and tostring(pathOrMessage) or 'Not rendered: the publish was cancelled.'
+					rendition:uploadFailed(reason .. QUEUED)
 				else
 					local leaf = LrPathUtils.leafName(pathOrMessage)
 					local bytes = readFile(pathOrMessage)

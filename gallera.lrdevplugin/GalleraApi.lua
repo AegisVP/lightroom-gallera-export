@@ -54,6 +54,21 @@ local function unwrap(resp)
 	return decoded.data
 end
 
+-- English text for the user. A message that came from Gallera (the error has an HTTP status) is in the
+-- account's language, so it's replaced by a generic text and only logged by the caller; the plugin's own
+-- messages (no status) are kept. 'auth' is worded by the caller (Auth.EXPIRED_MESSAGE).
+function GalleraApi.userText(err)
+	if not err then return 'Gallera error.' end
+	if err.kind == 'network' then return "Gallera can't be reached. Check the internet connection." end
+	if err.status == nil then return tostring(err.message or 'Gallera error.') end
+	if err.kind == 'notFound' then return string.format('Not found on Gallera (HTTP %s).', tostring(err.status)) end
+	local code = tonumber(err.status) or 0
+	if code >= 400 and code < 500 then
+		return string.format('Gallera rejected the request (HTTP %d).', code)
+	end
+	return string.format('Gallera error (HTTP %s). Try again later.', tostring(err.status))
+end
+
 -- For callers that read fields from data: passes err through, or reports a success without usable data.
 local function unexpected(err)
 	if err then return nil, err end

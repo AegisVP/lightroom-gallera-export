@@ -1,4 +1,4 @@
---[[ Plugin-owned published collection settings (DESIGN.md §6.1): galleryOrder (read with PhotoOrder.mode), overrideRender, longEdge,
+--[[ Plugin-owned published collection settings (DESIGN.md §6.1): galleryOrder (read with PhotoOrder.mode), jpegHandling ('service' | 'ask' | 'keep' | 'remove'), overrideRender, longEdge,
      jpegQuality, folderId, deleted, jpegFiles, fingerprints, favoritesColors, favoritesSeen.
      Dialog-only keys (g_*, ui_*, link_*) are never read back as truth (D3). ]]
 local LrApplication = import 'LrApplication'

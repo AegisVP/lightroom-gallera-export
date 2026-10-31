@@ -182,3 +182,31 @@ function TestGalleraApi:testGalleryNamesLogoutRestore()
 	lu.assertEquals({ self.fake.requests[2].method, self.fake.requests[2].url }, { 'POST', B .. 'auth/logout' })
 	lu.assertEquals({ self.fake.requests[3].method, self.fake.requests[3].url }, { 'POST', B .. 'galleries/x/restore' })
 end
+
+-- Error texts for the user are English: Gallera's message is in the account's language (seen: Ukrainian) --
+
+function TestGalleraApi:testUserTextHidesGalleraMessage()
+	local text = GalleraApi.userText { kind = 'api', status = 422, message = 'Адреса вашої галереї повинна бути унікальною' }
+	lu.assertEquals(text, 'Gallera rejected the request (HTTP 422).')
+end
+
+function TestGalleraApi:testUserTextServerError()
+	lu.assertEquals(GalleraApi.userText { kind = 'api', status = 500, message = 'x' }, 'Gallera error (HTTP 500). Try again later.')
+end
+
+function TestGalleraApi:testUserTextNotFound()
+	lu.assertEquals(GalleraApi.userText { kind = 'notFound', status = 404, message = 'No query results' }, 'Not found on Gallera (HTTP 404).')
+end
+
+function TestGalleraApi:testUserTextNetwork()
+	lu.assertEquals(GalleraApi.userText { kind = 'network', message = 'timeout' }, "Gallera can't be reached. Check the internet connection.")
+end
+
+function TestGalleraApi:testUserTextKeepsPluginMessagesWithoutStatus()
+	lu.assertEquals(GalleraApi.userText { kind = 'api', message = 'Unexpected response from Gallera' }, 'Unexpected response from Gallera')
+	lu.assertEquals(GalleraApi.userText { kind = 'storage', message = 'Gallera storage full' }, 'Gallera storage full')
+end
+
+function TestGalleraApi:testUserTextNil()
+	lu.assertEquals(GalleraApi.userText(nil), 'Gallera error.')
+end

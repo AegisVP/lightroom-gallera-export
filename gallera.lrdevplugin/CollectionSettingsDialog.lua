@@ -11,6 +11,7 @@ local LrTasks = import 'LrTasks'
 local LrView = import 'LrView'
 
 local Auth = require 'Auth'
+local GalleraApi = require 'GalleraApi'
 local CollectionStore = require 'CollectionStore'
 local FavoritesDialog = require 'FavoritesDialog'
 local GalleryLookup = require 'GalleryLookup'
@@ -31,7 +32,7 @@ local function gkey(key) return 'g_' .. key end
 
 local function errorText(err)
 	if err and err.kind == 'auth' then return Auth.EXPIRED_MESSAGE end
-	return 'Gallera: ' .. tostring(err and err.message or 'unknown error')
+	return GalleraApi.userText(err)   -- English; Gallera's own message is in the account's language
 end
 
 local function isTrue(v) return v == true or v == 1 end
@@ -218,9 +219,12 @@ local function fieldView(f, field, cs)
 			end,
 		}
 	else
-		control = f:edit_field { value = bind(key), enabled = enabled, width_in_chars = field.type == 'date' and 10 or 22 }
+		control = f:edit_field {
+			value = bind(key), enabled = enabled, width_in_chars = field.type == 'date' and 10 or 22,
+			placeholder_string = field.type == 'date' and 'YYYY-MM-DD' or nil,
+		}
 	end
-	local label = field.label .. (field.type == 'date' and ' (YYYY-MM-DD):' or ':')
+	local label = field.label .. ':'
 	return f:row {
 		f:static_text { title = label, width = LrView.share 'fieldLabel', alignment = 'right' },
 		control,
@@ -273,6 +277,18 @@ local function pluginView(f, collection)
 			fill_horizontal = 1,
 		},
 		f:row {
+			f:static_text { title = 'Uploaded JPEGs:' },
+			f:popup_menu {
+				value = bind 'jpegHandling',
+				items = {
+					{ title = 'Service setting', value = 'service' },
+					{ title = 'Keep, ask to remove after publish', value = 'ask' },
+					{ title = 'Always keep', value = 'keep' },
+					{ title = 'Always remove after upload', value = 'remove' },
+				},
+			},
+		},
+		f:row {
 			f:checkbox { title = 'Override size and quality:', value = bind 'overrideRender' },
 			f:static_text { title = 'Long edge (px)' },
 			f:edit_field { value = bind 'longEdge', enabled = bind 'overrideRender', min = 100, max = 20000, precision = 0, width_in_digits = 6 },
@@ -290,6 +306,7 @@ function CollectionSettingsDialog.viewForCollectionSettings(f, publishSettings, 
 	session = { galleryId = galleryId }
 
 	cs.galleryOrder = PhotoOrder.mode(cs)
+	if cs.jpegHandling == nil then cs.jpegHandling = 'service' end
 	if cs.overrideRender == nil then cs.overrideRender = false end
 	if cs.longEdge == nil then cs.longEdge = DEFAULT_LONG_EDGE end
 	if cs.jpegQuality == nil then cs.jpegQuality = DEFAULT_QUALITY end
@@ -403,7 +420,13 @@ local function saveChanges(api, galleryId, changed, collection)
 	local newSlug, err = api:saveGallery(slug, GallerySettings.apply(fresh, changed))
 	if not newSlug then
 		Log.warn('collection settings: save failed:', err and err.kind, err and err.status, err and err.message)
-		LrDialogs.message('Gallera settings were not saved', errorText(err), 'warning')
+		local text = errorText(err)
+		-- Gallera's 422 for a taken slug is only in the account's language (docs/gallera-api.md).
+		if err and err.status == 422 and changed.slug ~= nil then
+			text = string.format("The address '%s' can't be used: another of your galleries may already have it. "
+				.. 'Choose a different address.', tostring(changed.slug))
+		end
+		LrDialogs.message('Gallera settings were not saved', text, 'warning')
 		return nil
 	end
 	local keys = {}
