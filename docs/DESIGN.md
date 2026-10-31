@@ -71,7 +71,7 @@ All are documented in `docs/gallera-api.md` unless noted.
 | D5 | New galleries are created empty with Gallera's defaults (no template copy) | User choice |
 | D6 | Re-publish = upload new, **then** delete old | A failure never leaves a gap in the gallery |
 | D7 | Removing photos from the collection deletes them from the gallery on publish | Standard publish behavior |
-| D8 | Deleting a collection asks: **Move gallery to trash** / **Keep gallery** (unlink). The plugin never sends a second delete | User choice; protects against D-constraint 3 |
+| D8 | Deleting a collection asks: **Delete gallery** (moves it to Gallera's deleted galleries, restorable on the website) / **Keep gallery** (unlink). The plugin never sends a second delete. Lightroom asks first; its **Leave on service** choice skips the plugin's question and keeps the gallery | User choice; protects against D-constraint 3 |
 | D9 | Renaming the collection renames the gallery. A gallery renamed on the website later does not rename the collection. The exception is linking (D26) | Agreed default: the collection name stays under the user's control, and the settings dialog shows Gallera's current name. Name sync from Gallera could be added later if spike S3 shows `setName` works |
 | D10 | A deleted gallery is detected during any Gallera operation and once at Lightroom startup. The collection is renamed `<original name> - (deleted)` and flagged. The plugin never acts on its own | No "disabled" state exists in Lightroom; renaming is the only visible marker |
 | D11 | Deleted-gallery dialog: "This gallery was deleted[, but it is still available in Gallera trash]." Buttons: **[Restore]** (only if trashed) **[Create new]** **[Cancel]** | User choice |
@@ -335,7 +335,7 @@ This runs after the user removes photos from the published collection and clicks
 - **Otherwise:** `getGallery` → set `name` → `saveGallery`.
 
 ### 6.7 Deleting the collection (`deletePublishedCollection`)
-- **Gallery active:** ask **Move gallery to Gallera trash** / **Keep gallery**. Trash → `trashGallery(id)`. Keep → nothing.
+- **Gallery active:** ask "Delete the Gallera gallery too?" **Delete gallery** / **Keep gallery** (wording: user, 2026-10-31). Delete → `trashGallery(id)`. Keep → nothing.
 - **Gallery already trashed or gone:** no prompt, no API call.
 
 ### 6.8 Client favorites (always through the dialog, D13)
