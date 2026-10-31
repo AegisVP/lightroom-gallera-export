@@ -60,6 +60,10 @@ local function refreshAccount(propertyTable)
 end
 
 function ServiceSettingsDialog.startDialog(propertyTable)
+	-- Lightroom doesn't keep includeVideoFiles in the saved settings, so it opens as true and Lightroom resets it
+	-- to false (canExportVideo = false) a moment after the dialog opens. That write enabled Save and made every
+	-- Save ask to re-publish all photos. Setting it first leaves nothing to change (0.5.17).
+	propertyTable.LR_includeVideoFiles = false
 	if Auth.token(propertyTable.email) then
 		showLoggedIn(propertyTable, nil)
 		refreshAccount(propertyTable)
