@@ -613,6 +613,8 @@ local function run(exportContext, key)
 	end
 
 	if not cancelled then CollectionStore.update(collection, { jpegFiles = jpegFiles, fingerprints = fingerprints }) end
+
+	-- D17 (§6.4 step 9) runs in imposeSortOrderOnPublishedCollection: Lightroom calls it on every Publish.
 	if not ok then error(loopErr, 0) end
 end
 

@@ -327,7 +327,7 @@ Whenever a lookup (`GalleryLookup.find` or `getGallery`) returns a `public_url` 
    5. **The rendered JPEG** (D24): move it from Lightroom's temp folder to `<folder>\<collection name>\`. It overwrites this photo's earlier JPEG (from `jpegFiles`). If the name belongs to a different photo, a `-2`, `-3`, … suffix is added (D27). The collection name is made safe for Windows: `<>:"/\|?*` are replaced with `_`. This happens whether the upload succeeded or failed. If the setting is **Always remove after upload** and the upload succeeded, delete it instead (`LrFileUtils.delete`).
 7. **Delete old versions:** `deletePhotos(slug, oldIds)` for re-published photos whose new upload succeeded (D6), only ids still in the gallery (`listPhotos` + `PublishPlan.inGallery`): one id from another gallery (after Create new, §6.9) fails the whole call with 422. Skipped in the publish that ran Create new.
 8. **Order** (if Order on Gallera is **Capture date**; **Lightroom order** is sent by `imposeSortOrderOnPublishedCollection`, which Lightroom calls after the uploads, see §6.4a): `listPhotos(slug)` (photos with a non-null `deleted_at` are left out, here and in the storage estimate), build `captureTimes` from Lightroom's `dateTimeOriginal` for this collection's published photos, `PhotoOrder.compute`, `sortPhotos(slug, ids, nil)`.
-9. **Favorites check** (D17): `getFavorites(slug)`. If any list is new, or its `items_count` / `is_finished` differs from `favoritesSeen`, ask "Client favorites changed (list '<title>'…). Review now?" Yes → §6.8. Nothing is applied without the dialog.
+9. **Favorites check** (D17), run from `imposeSortOrderOnPublishedCollection` (§6.4a) because Lightroom calls it on every Publish, also with nothing queued, while `processRenderedPhotos` runs only for queued photos: `getFavorites(slug)`. If any list is new, or its `items_count` / `is_finished` differs from `favoritesSeen`, ask "Client favorites changed (list '<title>'…). Review now?" Yes → §6.8. Nothing is applied without the dialog.
 10. **Summary dialog** (only if there were failures or skipped labels): uploaded / failed / labels added, removed and skipped. If photos failed: "N photos failed to upload. They're still queued; click Publish to retry."
 11. **Keep, ask to remove** (the default setting): if at least one photo uploaded, ask "Remove the N uploaded JPEGs from `<folder>\<collection name>`?" **[Keep]** (default button) **[Remove]**. Remove deletes **only the JPEGs uploaded successfully in this publish**; failed ones stay. If the publish is cancelled or aborted midway, the JPEGs rendered so far have already been moved out of the temp folder (step 6.5), and the question covers the ones uploaded before the stop.
 
@@ -360,11 +360,15 @@ This runs after the user removes photos from the published collection and clicks
    - Apply inside `catalog:withWriteAccessDo`:
      - **set:** `photo:setRawMetadata('colorNameForLabel', color)` (S6: works under any label set; Lightroom stores that set's text for the color) and `galleraLabelApplied = "<listId>:<color>"`.
      - **remove:** clear the label and `galleraLabelApplied`.
-   - **Undo the re-publish flag (S7):** Lightroom marks every photo whose label changed as modified, and `metadataThatTriggersRepublish` can't prevent it. Poll for up to ~10 s until the noted photos are flagged, then `setEditedFlag(false)` on those that were not edited before (inside `withWriteAccessDo`). Photos the user really edited stay queued.
+   - **Undo the re-publish flag (S7):** Lightroom marks every photo whose label changed as modified, and `metadataThatTriggersRepublish` can't prevent it. Poll for up to ~10 s until the noted photos are flagged, then `setEditedFlag(false)` on those that were not edited before (inside `withWriteAccessDo`). Photos the user really edited stay queued. On 0.9.1 no photo was flagged within 10 s of a label change (as on 0.5.0: label edits don't queue with `metadataThatTriggersRepublish = { default = false }`), so the wait is 2 s and the unflag stays as a safety net. After a Lightroom restart the labeled photos were still under Published.
    - Save `favoritesColors` and `favoritesSeen`.
 5. Report the counts: labeled / changed / removed / kept their existing label / conflicts.
 
-Entry points: the **Gallera client favorites…** menu item (for the selected published collection), and the "Review now?" prompt after a publish (§6.4 step 9).
+- Incomplete lists (`#latest < items_count`) are completed by `FavoritesSync.completeLists`: a `lightroom_list` name (compared lowercased, already without extension) matching exactly one photo's `original_filename` without extension adds it; a name matching several photos is reported in the summary and labels nothing.
+- Conflicts count only between lists **chosen** this run: with one of two lists set to Skip, a photo in both gets the other list's color.
+- The summary names (up to 10) the photos that kept their own label and the conflicts (user, 2026-10-31).
+
+Entry points: the **Gallera client favorites…** menu item (for the selected published collection), the **Client favorites…** button in the collection settings dialog, and the "Review now?" prompt after a publish (§6.4 step 9).
 
 ### 6.9 Deleted gallery (D10, D11)
 **Marking:**
@@ -556,8 +560,8 @@ Other SDK facts from the spikes (also in CLAUDE.md): `LrPasswords.store(key, nil
 ### 12.2 Still open
 | Item | How to resolve |
 |---|---|
-| Clearing a label with `setRawMetadata('colorNameForLabel', 'none')` (or `''`) | Not tried in the spikes; check during implementation of §6.8 |
-| Whether a flag cleared with `setEditedFlag(false)` stays cleared after a Lightroom restart | Check during the manual test pass |
+| ~~Clearing a label with `setRawMetadata('colorNameForLabel', 'none')` (or `''`)~~ | **Resolved (Task 19, 0.9.2):** `'none'` clears the label |
+| Whether a flag cleared with `setEditedFlag(false)` stays cleared after a Lightroom restart | Not exercised: label changes never flagged a photo (Task 19). After a restart the labeled photos were still under Published |
 | ~~Whether `rendition:skipRender()` works for unchanged photos~~ | **Resolved (Task 15, 0.5.2):** inside the renditions loop it throws "AgExportRendition:skip(): must not be called after exportSession has started rendering". Kept photos render and the file is discarded (a 1-photo publish took 1.5 s); `recordPublishedPhotoId` with the old id then marks them published. Held photos render first too, since `uploadFailed` before the render isn't reported (Task 14) |
 | ~~Which develop-setting keys change without a visible change, and the raw-metadata key for orientation~~ | **Resolved (Task 15, 0.4.7, 178 develop keys):** a title or rating change changed no develop key, so `EXCLUDED_DEVELOP_KEYS` stays empty. `getRawMetadata('orientation')` works (`'DA'` → `'CD'` after Rotate Left; the develop settings also carry `orientation`). Exposure changes `Exposure2012`. A white-balance slider moved and moved back changes only the `WhiteBalance` label ("As Shot" → "Custom"), which counts as a change |
 | Gallera favorites `latest[]` completeness | **Resolved (Task 15):** not complete. A list with `items_count` 6 returned 4 in `latest` (and 5 `lightroom_list` names), so names are matched as a fallback (§6.4 step 4). After a favorited photo is re-uploaded, the list still counts the old photo by name, so the new photo with that name is treated as a favorite too |

@@ -9,6 +9,7 @@ local Auth = require 'Auth'
 local CollectionSettingsDialog = require 'CollectionSettingsDialog'
 local CollectionStore = require 'CollectionStore'
 local DeletedGallery = require 'DeletedGallery'
+local FavoritesDialog = require 'FavoritesDialog'
 local GalleryLookup = require 'GalleryLookup'
 local Log = require 'Log'
 local Names = require 'Names'
@@ -86,42 +87,49 @@ local function collectionOf(ids, localCollectionId, what)
 	return nil
 end
 
--- Lightroom order (D12) ---------------------------------------------------------------------
+-- After every Publish (D12, D17) ---------------------------------------------------------------
 
--- Lightroom passes the collection's User Order as remote ids. Only 'Lightroom order' collections are sorted;
--- photos added on the website go after the Lightroom ones. Failures are logged, never raised.
-function provider.imposeSortOrderOnPublishedCollection(publishSettings, info, remoteIdSequence)
-	-- info has no publishedCollection here, but localCollectionId (seen on 0.7.2).
-	Log.info('lightroom order:', #(remoteIdSequence or {}), 'photo id(s)')
-	local collection = collectionOf(remoteIdSequence or {}, info and info.localCollectionId, 'lightroom order')
-	if not collection then return Log.warn('lightroom order: collection not found') end
-	local mode = PhotoOrder.mode(CollectionStore.read(collection))
-	Log.info('lightroom order: collection', collection:getName(), 'mode', mode)
-	if mode ~= 'lightroom' then return end
-	local galleryId = tonumber(collection:getRemoteId())
-	if not galleryId then return end
-	local api = Auth.api(publishSettings)
-	if not api then return Log.warn('lightroom order: not logged in') end
-	local found, err = GalleryLookup.find(api, galleryId)
-	if not found then return Log.warn('lightroom order:', errorText(err)) end
-	if found.state ~= 'active' then return Log.info('lightroom order: gallery is', found.state) end
-	local photos
-	photos, err = api:listPhotos(found.slug)
+-- Sends Lightroom's User Order to the gallery: photos added on the website go after the Lightroom ones.
+local function sortToLightroomOrder(api, slug, remoteIdSequence)
+	local photos, err = api:listPhotos(slug)
 	if not photos then return Log.warn('lightroom order: cannot list the gallery photos:', errorText(err)) end
 	local current = {}
 	for _, p in ipairs(photos) do
 		local id = tonumber(p.id)
 		if id then current[#current + 1] = id end
 	end
-	local order = PhotoOrder.fromSequence { galleryPhotoIds = current, sequence = remoteIdSequence or {} }
+	local order = PhotoOrder.fromSequence { galleryPhotoIds = current, sequence = remoteIdSequence }
 	local same = #order == #current
 	for i = 1, #order do
 		if order[i] ~= current[i] then same = false end
 	end
 	if same then return Log.info('lightroom order: gallery already in this order') end
-	local _, sortErr = api:sortPhotos(found.slug, order, nil)
+	local _, sortErr = api:sortPhotos(slug, order, nil)
 	if sortErr then return Log.warn('lightroom order: sorting failed:', errorText(sortErr)) end
 	Log.info('lightroom order: sorted', #order, 'photo(s)')
+end
+
+-- Lightroom calls this on every Publish, also with nothing queued, after the uploads, with the collection's
+-- User Order as remote ids. It sorts 'Lightroom order' collections and offers the favorites review (D17).
+-- Failures are logged, never raised.
+function provider.imposeSortOrderOnPublishedCollection(publishSettings, info, remoteIdSequence)
+	-- info has no publishedCollection here, but localCollectionId (seen on 0.7.2).
+	remoteIdSequence = remoteIdSequence or {}
+	Log.info('after publish:', #remoteIdSequence, 'photo id(s)')
+	local collection = collectionOf(remoteIdSequence, info and info.localCollectionId, 'after publish')
+	if not collection then return Log.warn('after publish: collection not found') end
+	local galleryId = tonumber(collection:getRemoteId())
+	if not galleryId then return end
+	local api = Auth.api(publishSettings)
+	if not api then return Log.warn('after publish: not logged in') end
+	local found, err = GalleryLookup.find(api, galleryId)
+	if not found then return Log.warn('after publish:', errorText(err)) end
+	if found.state ~= 'active' then return Log.info('after publish: gallery is', found.state) end
+
+	local mode = PhotoOrder.mode(CollectionStore.read(collection))
+	Log.info('after publish: collection', collection:getName(), 'order mode', mode)
+	if mode == 'lightroom' then sortToLightroomOrder(api, found.slug, remoteIdSequence) end
+	FavoritesDialog.offerReview(collection, api, found.slug)
 end
 
 -- Removing photos (§6.5) --------------------------------------------------------------

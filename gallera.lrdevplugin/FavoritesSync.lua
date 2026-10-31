@@ -104,6 +104,51 @@ function FavoritesSync.changedLists(lists, seen)
 	return changed
 end
 
+local function baseName(filename)
+	return (tostring(filename):gsub('%.[^.]*$', '')):lower()
+end
+
+-- §6.8 step 2: latest[] can be shorter than items_count (seen: 4 of 6). For such a list, each lightroom_list
+-- name (no extension) matching exactly one gallery photo's original_filename (any case) adds that photo.
+-- A name matching several photos is reported in ambiguous = { { list = display title, name } } and adds none.
+-- Returns copies of the lists; the input is not changed.
+function FavoritesSync.completeLists(lists, galleryPhotos)
+	local byName = {}
+	for _, p in ipairs(galleryPhotos or {}) do
+		local id = tonumber(p.id)
+		if id and p.original_filename then
+			local name = baseName(p.original_filename)
+			byName[name] = byName[name] or {}
+			table.insert(byName[name], id)
+		end
+	end
+	local out, ambiguous = {}, {}
+	for _, list in ipairs(lists) do
+		local copy = {}
+		for k, v in pairs(list) do copy[k] = v end
+		local ids = latestIds(list)
+		if #ids < (tonumber(list.items_count) or 0) then
+			local have, latest = {}, {}
+			for _, id in ipairs(ids) do
+				have[id] = true
+				latest[#latest + 1] = { id = id }
+			end
+			for _, name in ipairs(list.lightroom_list or {}) do
+				local matches = byName[tostring(name):lower()] or {}  -- names already lack the extension
+				if #matches > 1 then
+					ambiguous[#ambiguous + 1] = { list = FavoritesSync.displayTitle(list.title), name = name }
+				elseif #matches == 1 and not have[matches[1]] then
+					have[matches[1]] = true
+					latest[#latest + 1] = { id = matches[1] }
+				end
+			end
+			copy.latest = latest
+		end
+		out[#out + 1] = copy
+	end
+	return out, ambiguous
+end
+
 function FavoritesSync.seenFrom(lists)
 	local seen = {}
 	for _, list in ipairs(lists) do

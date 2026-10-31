@@ -129,3 +129,53 @@ function TestFavoritesSync:testSeenFromRoundTrip()
 	lu.assertEquals(seen, { [85261] = { count = 3, finished = true }, [85241] = { count = 1, finished = false } })
 	lu.assertEquals(FavoritesSync.changedLists(lists(), seen), {})
 end
+
+-- Incomplete latest[] (seen: 4 of 6): names from lightroom_list fill it in (§6.8 step 2) -----------
+
+local function incomplete()
+	return {
+		{ id = 7, title = 'picks', items_count = 3, latest = { { id = 1 } }, lightroom_list = { 'IMG_1', 'img_2', 'IMG_3' } },
+		{ id = 8, title = 'full', items_count = 1, latest = { { id = 9 } }, lightroom_list = { 'IMG_9', 'IMG_2' } },
+	}
+end
+
+local galleryPhotos = {
+	{ id = 1, original_filename = 'IMG_1.jpg' },
+	{ id = 2, original_filename = 'IMG_2.JPG' },
+	{ id = 3, original_filename = 'IMG_3.jpg' },
+	{ id = 4, original_filename = 'img_3.jpeg' },
+	{ id = 9, original_filename = 'IMG_9.jpg' },
+}
+
+local function latestOf(list)
+	local ids = {}
+	for _, p in ipairs(list.latest) do ids[#ids + 1] = p.id end
+	return ids
+end
+
+function TestFavoritesSync:testCompleteListsAddsNameMatches()
+	local out = FavoritesSync.completeLists(incomplete(), galleryPhotos)
+	lu.assertEquals(latestOf(out[1]), { 1, 2 })
+end
+
+function TestFavoritesSync:testCompleteListsReportsAmbiguousNames()
+	local _, ambiguous = FavoritesSync.completeLists(incomplete(), galleryPhotos)
+	lu.assertEquals(ambiguous, { { list = 'picks', name = 'IMG_3' } })
+end
+
+function TestFavoritesSync:testCompleteListsLeavesCompleteListsAlone()
+	local out = FavoritesSync.completeLists(incomplete(), galleryPhotos)
+	lu.assertEquals(latestOf(out[2]), { 9 })
+end
+
+function TestFavoritesSync:testCompleteListsDoesNotChangeInput()
+	local input = incomplete()
+	FavoritesSync.completeLists(input, galleryPhotos)
+	lu.assertEquals(latestOf(input[1]), { 1 })
+end
+
+function TestFavoritesSync:testCompletedListsFeedPlan()
+	local out = FavoritesSync.completeLists(incomplete(), galleryPhotos)
+	local r = plan({ [7] = 'red' }, { [2] = { key = 'b' } }, out)
+	lu.assertEquals(r.set, { { key = 'b', color = 'red', listId = 7 } })
+end

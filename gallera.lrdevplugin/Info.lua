@@ -8,10 +8,14 @@ return {
 	LrInitPlugin = 'Init.lua',
 	LrMetadataProvider = 'GalleraMetadata.lua',
 
+	LrLibraryMenuItems = {
+		{ title = 'Gallera client favorites...', file = 'FavoritesCommand.lua' },
+	},
+
 	LrExportServiceProvider = {
 		title = 'Gallera',
 		file = 'PublishServiceProvider.lua',
 	},
 
-	VERSION = { major = 0, minor = 8, revision = 1 },
+	VERSION = { major = 0, minor = 9, revision = 2 },
 }

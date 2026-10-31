@@ -12,6 +12,7 @@ local LrView = import 'LrView'
 
 local Auth = require 'Auth'
 local CollectionStore = require 'CollectionStore'
+local FavoritesDialog = require 'FavoritesDialog'
 local GalleryLookup = require 'GalleryLookup'
 local GallerySettings = require 'GallerySettings'
 local Log = require 'Log'
@@ -244,11 +245,18 @@ local function sectionView(f, name, cs)
 	return f:group_box(rows)
 end
 
-local function pluginView(f)
+local function pluginView(f, collection)
 	local bind = LrView.bind
 	return f:group_box {
 		title = 'Lightroom',
 		fill_horizontal = 1,
+		f:push_button {
+			title = 'Client favorites…',
+			enabled = collection ~= nil,
+			action = function()
+				LrTasks.startAsyncTask(function() FavoritesDialog.run(collection) end)
+			end,
+		},
 		f:row {
 			f:static_text { title = 'Order on Gallera:' },
 			f:popup_menu {
@@ -331,7 +339,7 @@ function CollectionSettingsDialog.viewForCollectionSettings(f, publishSettings, 
 			f:column { fill_horizontal = 1, sectionView(f, 'General', cs), sectionView(f, 'Scenes', cs) },
 			f:column { fill_horizontal = 1, sectionView(f, 'Favorites', cs), sectionView(f, 'Saving', cs), sectionView(f, 'Access', cs) },
 		},
-		pluginView(f),
+		pluginView(f, collection),
 	}
 end
 
