@@ -188,3 +188,15 @@ function TestGallerySettings:testApplyStartsFromFreshObject()
 	lu.assertEquals(out.allow_download, true)
 	lu.assertEquals(out.name, 'b')
 end
+
+-- The collection dialog's g_*/ui_*/link_* keys must not stay in the catalog: g_password is the gallery password.
+function TestGallerySettings:testWithoutDialogKeysDropsGPasswordAndUiKeys()
+	local stored = {
+		LR_canEditName = true, orderByCapture = true, longEdge = 1000, fingerprints = { ['1'] = 'x' },
+		g_password = 'secret', g_name = 'n', ui_access = 'public', ui_en_name = true, link_mode = 'link', link_id = 1,
+	}
+	lu.assertEquals(GallerySettings.withoutDialogKeys(stored), {
+		LR_canEditName = true, orderByCapture = true, longEdge = 1000, fingerprints = { ['1'] = 'x' },
+	})
+	lu.assertEquals(stored.g_password, 'secret')   -- a copy; the input is untouched
+end

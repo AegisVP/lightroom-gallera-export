@@ -11,6 +11,7 @@ local LrTasks = import 'LrTasks'
 local LrView = import 'LrView'
 
 local Auth = require 'Auth'
+local CollectionStore = require 'CollectionStore'
 local GalleryLookup = require 'GalleryLookup'
 local GallerySettings = require 'GallerySettings'
 local Log = require 'Log'
@@ -441,6 +442,16 @@ end
 function CollectionSettingsDialog.updateCollectionSettings(publishSettings, info)
 	local ok, err = LrTasks.pcall(update, publishSettings, info)
 	clearDialogKeys(info.collectionSettings)
+	-- Lightroom saves the dialog's values after this callback (S3), so the clear above doesn't always stick
+	-- ('link test' kept g_password): rewrite the stored settings without dialog keys a moment later.
+	local collection = info.publishedCollection
+	if collection then
+		LrTasks.startAsyncTask(function()
+			LrTasks.sleep(1)
+			local cleaned = LrTasks.pcall(CollectionStore.update, collection, {})
+			if not cleaned then Log.warn('updateCollectionSettings: dialog keys not cleared') end
+		end)
+	end
 	if not ok then
 		Log.error('updateCollectionSettings failed:', tostring(err))
 		LrDialogs.message('Gallera', 'Saving the collection settings failed: ' .. tostring(err), 'critical')

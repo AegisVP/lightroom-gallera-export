@@ -146,4 +146,15 @@ function GallerySettings.apply(fresh, changed)
 	return out
 end
 
+-- A copy of stored collection settings without the collection dialog's g_*/ui_*/link_* keys (dialog-only, D3;
+-- g_password is the gallery password and must not stay in the catalog).
+function GallerySettings.withoutDialogKeys(settings)
+	local out = {}
+	for k, v in pairs(settings) do
+		local dialogKey = type(k) == 'string' and (k:find('^g_') or k:find('^ui_') or k:find('^link_'))
+		if not dialogKey then out[k] = v end
+	end
+	return out
+end
+
 return GallerySettings

@@ -3,6 +3,8 @@
      Dialog-only keys (g_*, ui_*, link_*) are never read back as truth (D3). ]]
 local LrApplication = import 'LrApplication'
 
+local GallerySettings = require 'GallerySettings'
+
 local CollectionStore = {}
 
 CollectionStore.DEFAULTS = { orderByCapture = true, overrideRender = false }
@@ -26,14 +28,15 @@ function CollectionStore.read(collection)
 	return settings
 end
 
--- Merges changes into the stored settings. Must not be called inside another withWriteAccessDo.
+-- Merges changes into the stored settings and drops leftover dialog keys (g_password must not stay in the
+-- catalog). Must not be called inside another withWriteAccessDo.
 function CollectionStore.update(collection, changes)
 	LrApplication.activeCatalog():withWriteAccessDo('Gallera: save collection settings', function()
 		local merged = copySettings(collection)
 		for k, v in pairs(changes) do
 			if v == CollectionStore.CLEAR then merged[k] = nil else merged[k] = v end
 		end
-		collection:setCollectionSettings(merged)
+		collection:setCollectionSettings(GallerySettings.withoutDialogKeys(merged))
 	end, { timeout = 10 })
 end
 
