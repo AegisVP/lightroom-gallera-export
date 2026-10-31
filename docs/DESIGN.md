@@ -102,6 +102,7 @@ All are documented in `docs/gallera-api.md` unless noted.
 ```text
 gallera.lrdevplugin/
   Info.lua                       -- plugin manifest
+  small_icon.png                 -- 16x16 service icon in the Publish Services panel (Gallera's favicon)
   Init.lua                       -- LrInitPlugin: starts the startup deleted-gallery check
   -- core (no Lr* imports; loadable by plain Lua 5.1 for tests)
   -- All files sit in the plugin root: Lightroom's `require` is assumed not to load from subfolders (unverified).

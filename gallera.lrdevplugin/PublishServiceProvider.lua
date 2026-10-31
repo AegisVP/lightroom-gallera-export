@@ -25,6 +25,8 @@ local provider = {
 	canExportVideo = false,
 	hideSections = { 'exportLocation' },
 	hidePrintResolution = true,
+	-- Shown next to the service name in the Publish Services panel: Gallera's 16x16 favicon (from gallera.io).
+	small_icon = 'small_icon.png',
 	-- User Order in published collections; Lightroom passes it to imposeSortOrderOnPublishedCollection (D12).
 	supportsCustomSortOrder = true,
 
