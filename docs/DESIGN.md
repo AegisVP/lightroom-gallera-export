@@ -1,7 +1,7 @@
 # Gallera Publish Service for Lightroom Classic: Design
 
 - **Date:** 2026-10-30
-- **Status:** Approved in brainstorming. Spikes S1–S7 ran on 2026-10-30 (results in §12.1, design updated). Next step: write the implementation plan (superpowers `writing-plans`).
+- **Status:** Implemented (PoC), version 0.10.0 (2026-10-31). Spikes S1–S7 ran on 2026-10-30 (results in §12.1). Manual checklist: `docs/manual-tests.md`.
 - **Companion docs:** `docs/gallera-api.md` (reverse-engineered API, the source of truth for endpoints), `CLAUDE.md`.
 
 ## 1. Purpose and success criteria
@@ -82,7 +82,7 @@ All are documented in `docs/gallera-api.md` unless noted.
 | D16 | Favorites are matched by **recorded Gallera photo id**. Filenames are never changed; `lightroom_list` filename matching is a fallback only | Ids are exact; filenames are kept for human readability and the fallback |
 | D17 | The Client favorites dialog opens from **Library > Plug-in Extras > Gallera client favorites…**. After a publish, if any list is new or has changed since the last review (by `items_count` / `is_finished`), the plugin asks "Client favorites changed (list 'vv'). Review now?" Yes opens the dialog | The dialog is offered when it's relevant, but nothing is applied without it |
 | D22 | **Originals are never modified or deleted.** The only things the plugin changes in the catalog: color labels (D14), its own hidden metadata field, Lightroom's publish records, and the published collection's name, remote id and settings. What happens to rendered JPEGs is a service setting (D24) | User requirement |
-| D24 | JPEGs are **kept by default**. Every rendered JPEG goes to `<folder>\<collection name>\`, where the folder defaults to `Pictures\Gallera` (`LrPathUtils.getStandardFilePath('pictures')`). A re-rendered photo overwrites its earlier JPEG. Service setting **Uploaded JPEGs**: **Keep, ask to remove after publish** (default) / **Always keep** / **Always remove after upload**. Only successfully uploaded JPEGs are ever removed; failed ones are always kept | User choice: the files are kept unless the user says otherwise |
+| D24 | JPEGs are **kept by default**. Every rendered JPEG goes to `<folder>\<collection name>\`, where the folder defaults to `Pictures\Gallera` (`LrPathUtils.getStandardFilePath('pictures')`). A re-rendered photo overwrites its earlier JPEG. Service setting **Uploaded JPEGs**: **Keep, ask to remove after publish** (default) / **Always keep** / **Always remove after upload**. Only successfully uploaded JPEGs are ever removed; failed ones are always kept. Each collection can override it: **Uploaded JPEGs** = **Service setting** (default) / Keep, ask to remove / Always keep / Always remove after upload (`PublishPlan.jpegHandling`) | User choice: the files are kept unless the user says otherwise; per-collection choice added 2026-10-31 |
 | D25 | Failed uploads: each photo gets **up to 3 attempts** within a publish (on `network` errors, and on a PUT to an expired or rejected signed URL), waiting 2 s then 5 s, with a fresh signed URL each time. After that, the photo is reported failed (`rendition:uploadFailed`) and stays in Lightroom's publish queue. **Publish again** retries it; Lightroom re-renders from the original | Lightroom's standard retry is a manual re-publish; automatic attempts cover brief network problems |
 | D23 | Storage: before uploading, compare the estimated publish size with free Gallera storage. If it may not fit, warn with **Continue anyway** / **Cancel**. During upload, stop when the next file truly doesn't fit | User choice |
 | D18 | Rendering: JPEG only. The service holds the full Lightroom export settings. Each collection can override **long edge** and **JPEG quality**. Mechanism (S1 variant A): in `processRenderedPhotos`, before the first `exportContext:renditions()` call, write the override's `LR_size_*` / `LR_jpeg_quality` into `exportContext.propertyTable`, and restore the saved values when the loop ends (also on error) | User choice; proven by spike S1 |
@@ -135,8 +135,6 @@ spec/                            -- luaunit tests for core modules (D29)
   run.lua                        -- runs every spec/*_test.lua
   *_test.lua
   fixtures/                      -- sanitized JSON responses from HAR captures
-spikes/
-  gallera-spike.lrdevplugin/     -- throwaway plugin for spikes S1–S7 (§9.1)
 tools/                           -- gitignored; portable Lua 5.1 in tools/lua51/
 docs/
   gallera-api.md
@@ -270,7 +268,7 @@ Fingerprint.of{ develop = <getDevelopSettings() table>, orientation = <string|ni
 | Publish service settings | `email` (not secret), `username` (for display), `jpegHandling` (`"ask"` (default), `"keep"` or `"remove"`), `jpegFolder`, plus the standard export settings |
 | `LrPasswords` | Token per email (`gallera.token:<email>`) |
 | Published collection `remoteId` / `remoteUrl` | Gallera gallery **id** / gallery `public_url` |
-| Collection settings (plugin-owned) | `favoritesColors` = `{ [listId] = color }` (last choices, to pre-fill the dialog), `favoritesSeen` = `{ [listId] = { count, finished } }` (to detect changed lists, D17), `galleryOrder` (`'capture'` (default), `'lightroom'` or `'none'`; the old `orderByCapture` checkbox is read by `PhotoOrder.mode`), `overrideRender` (default `false`), `longEdge`, `jpegQuality`, `folderId` (always `nil` in the PoC), `deleted` = `nil` or `{ state, originalName }` (state is `"trashed"` or `"gone"`), `jpegFiles` = `{ [photo localIdentifier] = file name }` (D27), `fingerprints` = `{ [photo localIdentifier] = fingerprint of the uploaded version }` (D30) |
+| Collection settings (plugin-owned) | `favoritesColors` = `{ [listId] = color }` (last choices, to pre-fill the dialog), `favoritesSeen` = `{ [listId] = { count, finished } }` (to detect changed lists, D17), `jpegHandling` (`'service'` (default), `'ask'`, `'keep'` or `'remove'`, D24), `galleryOrder` (`'capture'` (default), `'lightroom'` or `'none'`; the old `orderByCapture` checkbox is read by `PhotoOrder.mode`), `overrideRender` (default `false`), `longEdge`, `jpegQuality`, `folderId` (always `nil` in the PoC), `deleted` = `nil` or `{ state, originalName }` (state is `"trashed"` or `"gone"`), `jpegFiles` = `{ [photo localIdentifier] = file name }` (D27), `fingerprints` = `{ [photo localIdentifier] = fingerprint of the uploaded version }` (D30) |
 | Published photo | `publishedPhotoId` = Gallera photo id. `publishedPhotoUrl` = gallery `public_url` (Gallera has no known per-photo page) |
 | Photo custom metadata | `galleraLabelApplied` (`"<listId>:<color>"`) |
 | Originals | **Never modified or deleted** (D22). Only the color label changes |
@@ -447,6 +445,7 @@ Entry points: the **Gallera client favorites…** menu item (for the selected pu
 
 **Plugin settings** (stored in Lightroom)
 - **Order on Gallera:** a popup, Capture date (default) / Lightroom order (User Order) / Don't change, with the hint "Lightroom order: sort the collection by User Order and drag photos; Publish sends the order."
+- **Uploaded JPEGs:** a popup, Service setting (default) / Keep, ask to remove after publish / Always keep / Always remove after upload (D24).
 - **Override size and quality:** a checkbox, plus long edge (px) and JPEG quality (0–100).
 - A **Client favorites…** button that opens the dialog in §7.3.
 
@@ -525,7 +524,7 @@ Write `docs/manual-tests.md` during implementation. Use a dedicated **test galle
 - The log contains no secrets
 
 ## 10. Build order (input for the implementation plan)
-1. Spikes S1–S7 (`spikes/gallera-spike.lrdevplugin`). Update this spec with the results.
+1. Spikes S1–S7 (a throwaway plugin, removed after implementation; results in §12.1). Update this spec with the results.
 2. Plugin skeleton (`Info.lua`, provider stub, logging) that loads in Lightroom.
 3. Core modules with tests: `GalleraApi` + adapter contract → `GallerySettings` → `GalleryLookup` → `PhotoOrder` → `FavoritesSync`.
 4. `LrHttpAdapter` + `Auth` + service dialog (log in and log out working end to end).
@@ -564,13 +563,35 @@ Other SDK facts from the spikes (also in CLAUDE.md): `LrPasswords.store(key, nil
 | Whether a flag cleared with `setEditedFlag(false)` stays cleared after a Lightroom restart | Not exercised: label changes never flagged a photo (Task 19). After a restart the labeled photos were still under Published |
 | ~~Whether `rendition:skipRender()` works for unchanged photos~~ | **Resolved (Task 15, 0.5.2):** inside the renditions loop it throws "AgExportRendition:skip(): must not be called after exportSession has started rendering". Kept photos render and the file is discarded (a 1-photo publish took 1.5 s); `recordPublishedPhotoId` with the old id then marks them published. Held photos render first too, since `uploadFailed` before the render isn't reported (Task 14) |
 | ~~Which develop-setting keys change without a visible change, and the raw-metadata key for orientation~~ | **Resolved (Task 15, 0.4.7, 178 develop keys):** a title or rating change changed no develop key, so `EXCLUDED_DEVELOP_KEYS` stays empty. `getRawMetadata('orientation')` works (`'DA'` → `'CD'` after Rotate Left; the develop settings also carry `orientation`). Exposure changes `Exposure2012`. A white-balance slider moved and moved back changes only the `WhiteBalance` label ("As Shot" → "Custom"), which counts as a change |
-| Gallera favorites `latest[]` completeness | **Resolved (Task 15):** not complete. A list with `items_count` 6 returned 4 in `latest` (and 5 `lightroom_list` names), so names are matched as a fallback (§6.4 step 4). After a favorited photo is re-uploaded, the list still counts the old photo by name, so the new photo with that name is treated as a favorite too |
+| ~~Gallera favorites `latest[]` completeness~~ | **Resolved (Task 15):** not complete. A list with `items_count` 6 returned 4 in `latest` (and 5 `lightroom_list` names), so names are matched as a fallback (§6.4 step 4). After a favorited photo is re-uploaded, the list still counts the old photo by name, so the new photo with that name is treated as a favorite too |
 | "Filename" ↔ `allow_caption` | Toggle it on the website, then compare the gallery object |
 | "People recognition" availability on the user's plan | Check `face_grouping_available` |
 | ~~Whether `photos/sort` with `type: manual` changes `order_by` to manual~~ | **Resolved (Task 17, 0.7.x):** yes, after the plugin's sort the website's sort option shows Manual. In a manually ordered gallery Gallera puts a new upload first |
-| Whether `latest` is always complete for big lists | Capture a favorites list with more than 20 photos |
+| ~~Whether `latest` is always complete for big lists~~ | **Resolved:** not even for small lists (4 of 6); the name fallback (`FavoritesSync.completeLists`, `PublishPlan.favoriteIndex`) always applies when `#latest < items_count` |
 | Token lifetime | Observe; the `auth` handling covers expiry |
-| Error shape for 422 (validation, e.g. a taken slug) | Capture once it happens; update `docs/gallera-api.md`. (The invalid-token shape is known: 403 `auth`) |
+| ~~Error shape for 422 (validation, e.g. a taken slug)~~ | **Resolved:** the usual wrapper with a localized `message` (wrong password, taken slug, foreign photo id); see `docs/gallera-api.md` |
 | Meaning of `storage_period` on create | The PoC sends `"0"` as the website does |
 | Whether Lightroom's `require` can load files from plugin subfolders | Not tested; all modules stay in the plugin root (§5.1) |
 | Whether `storage.limit` can be null (unlimited plans) | Handled by skipping the pre-check (§6.4) |
+
+### 12.3 Lightroom SDK facts learned during implementation (Lightroom Classic 15.6, Windows)
+1. In `sectionsForTopOfDialog`, `visible` bindings never hid a row; `enabled` bindings work.
+2. `rendition:uploadFailed()` before `waitForRender()` isn't reported. Render first.
+3. Offline, `LrHttp.postMultipart` returns a body with no HTTP status (not `nil`); a missing status is treated as a network failure.
+4. `LrDialogs.message` after the renditions loop never appeared; `LrDialogs.confirm` after the loop works; dialogs before the loop work.
+5. The service dialog's Save is enabled by any net change of a property after it opens, including Lightroom's own `LR_*` resets; OK then asks to mark all photos for re-publish. Lightroom resets `LR_includeVideoFiles` to false when `canExportVideo = false`, so `startDialog` sets it. Non-preset `ui_*` keys don't enable Save.
+6. The collection dialog's confirm button says "Edit"/"Create" (Lightroom's own).
+7. `updateCollectionSettings` + `withWriteAccessDo` + a 1 s-delayed `setName` works for the D26 rename. Keys set to nil on `info.collectionSettings` there don't stick.
+8. `exportSession:photosToExport()` returns an iterator; `getPublishedPhotos()` an array.
+9. `rendition:skipRender()` throws inside the renditions loop.
+10. Returning from `processRenderedPhotos` without iterating `renditions()` leaves the photos queued, no error.
+11. `f:catalog_photo { photo, width, height }` shows thumbnails in a modal dialog; `f:scrolled_view` with bound checkboxes works.
+12. `getRawMetadata('orientation')` works; `getDevelopSettings()` has 178 keys.
+13. With `metadataThatTriggersRepublish = { default = false }`, title, rating and color-label changes don't queue a published photo, including labels set by the plugin with `setRawMetadata('colorNameForLabel', …)` (contrary to spike S7). `'none'` clears a label.
+14. `deletePhotosFromPublishedCollection` gets the collection's local id as a 4th argument.
+15. Deleting a published collection: Lightroom asks first; its **Leave on service** choice doesn't call `deletePublishedCollection`.
+16. With `supportsCustomSortOrder = true`, moving photos in User Order doesn't queue them; every Publish (also with nothing queued) calls `imposeSortOrderOnPublishedCollection` after the uploads, with all remote ids in User Order. Its `info` has `localCollectionId`, `remoteCollectionId`, `name`, `collectionSettings`, `publishSettings`, `publishedUrl`, `parents`, `isDefaultCollection`, `isCollectionSet`, `publishConnectionId`, and no `publishedCollection`. Unpublished photos can't be moved.
+17. `processRenderedPhotos` isn't called when nothing is queued.
+18. Lightroom runs `LrInitPlugin` again at the start of every publish, not only on startup and reload.
+19. The plugin's own `collection:setName` doesn't call `renamePublishedCollection`.
+20. The Publish Services panel can draw a newly created collection's row narrow (name cropped) until the panel is resized.

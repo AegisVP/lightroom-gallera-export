@@ -10,7 +10,10 @@ Gallera has no public API. This document comes from HAR captures of the app.gall
 - Errors use the same wrapper. The backend is Laravel. Captured so far:
   - HTTP 404, `{"status": "notFound", "message": "No query results for model [App\\Models\\Gallery].", "data": {"message": ...}}`.
   - HTTP **403**, `{"status": "auth", "message": "Unauthenticated."}` for a revoked or invalid token (seen from the Lightroom spikes, 2026-10-30). Not 401.
-  - 422 (validation) hasn't been captured yet.
+  - HTTP **422** (validation), same wrapper with a localized `message` (seen from the plugin, 2026-10-31):
+    - `auth/login` with a wrong password: "Пароль введено невірно".
+    - Saving a gallery with a slug another gallery of the account uses: "Адреса вашої галереї повинна бути унікальною серед ваших інших галерей."
+    - `photos/delete` with an id that isn't in that gallery (e.g. from a deleted gallery): "Вибране для photos.0 значення не коректне. (and 5 more errors)". **One foreign id fails the whole call**, so send only ids that are in the gallery.
 - `message` is **localized** to the account's language (e.g. login success came back as "Авторизація успішна"). Branch on `status` and the HTTP code, never on `message`.
 - Galleries have two identifiers:
   - `id` (numeric, never changes)
@@ -34,7 +37,7 @@ Gallera has no public API. This document comes from HAR captures of the app.gall
 ### List
 - `GET v2/galleries/my?page=1&sort=created&search=` → `data.galleries[]` (`id`, `name`, `slug`, `date`, `photos_count`, `is_public`, `has_password`, `allow_download`, `storage_to_date`, …), `data.pagination` (`current_page`, `last_page`, `has_more`, `total`). **Use this one to resolve id → slug.**
 - `GET galleries/list` → `data[]` with only `{id, name, small_cover_url}`. No slug, but cheap. Good for a picker.
-- `GET galleries/my/deleted` → galleries in the trash.
+- `GET galleries/my/deleted` → galleries in the trash. The plugin accepts both `data[]` and `data.galleries[]`; which one Gallera sends wasn't recorded (both work).
 
 ### Create
 `POST galleries/create`
@@ -115,6 +118,8 @@ The web UI also calls `POST analytics/uploading`. That call isn't needed.
 {"gallery": "<slug>", "photos": [140349250]}
 ```
 → `data` = the deleted ids. It appears to be a soft delete (the gallery's `deleted_count` goes up).
+- A photo already deleted on the website (same gallery) is still accepted: HTTP 200 and its id in `data` (2026-10-31).
+- An id from another gallery fails the whole call with 422 (see Basics).
 
 ### Sort (manual order)
 `POST photos/sort`
