@@ -125,7 +125,7 @@ The web UI also calls `POST analytics/uploading`. That call isn't needed.
 → `data` echoes the request.
 
 - `sorted` is the **complete** list of photo ids in the new order. The UI sends every photo even when only two swapped places. Send all photos, including ones the plugin didn't upload.
-- `type: "manual"` matches the "Manual" sort option. Presumably this also switches the gallery's `order_by` to manual (unverified).
+- `type: "manual"` matches the "Manual" sort option. It switches the gallery to Manual: the website's sort option shows Manual after the plugin's sort (2026-10-31). In a manually ordered gallery a new upload is placed first.
 - `folder` is `null` for the whole gallery. It is presumably a scene (folder) id when sorting within a scene, which is relevant once scenes are supported.
 
 ### Replace

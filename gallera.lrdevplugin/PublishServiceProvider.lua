@@ -11,6 +11,7 @@ local CollectionStore = require 'CollectionStore'
 local GalleryLookup = require 'GalleryLookup'
 local Log = require 'Log'
 local Names = require 'Names'
+local PhotoOrder = require 'PhotoOrder'
 local Publish = require 'Publish'
 local PublishPlan = require 'PublishPlan'
 local ServiceSettingsDialog = require 'ServiceSettingsDialog'
@@ -21,6 +22,8 @@ local provider = {
 	canExportVideo = false,
 	hideSections = { 'exportLocation' },
 	hidePrintResolution = true,
+	-- User Order in published collections; Lightroom passes it to imposeSortOrderOnPublishedCollection (D12).
+	supportsCustomSortOrder = true,
 
 	-- Saved in plain text in presets: never a token or password here.
 	exportPresetFields = {
@@ -57,18 +60,18 @@ local function errorText(err)
 	return tostring(err and err.message or 'Gallera error')
 end
 
--- Removing photos (§6.5) --------------------------------------------------------------
+-- Finding the collection -------------------------------------------------------------
 
 -- The published collection the removed photos belong to. Lightroom passes its local id as the 4th argument;
 -- without it, the collection whose published photos carry these remote ids is searched for.
-local function collectionOf(ids, localCollectionId)
+local function collectionOf(ids, localCollectionId, what)
 	local catalog = LrApplication.activeCatalog()
 	if localCollectionId ~= nil then
 		local c = catalog:getPublishedCollectionByLocalIdentifier(localCollectionId)
 		if c then return c end
-		Log.warn('remove photos: no published collection with local id', localCollectionId)
+		Log.warn(what .. ': no published collection with local id', localCollectionId)
 	else
-		Log.warn('remove photos: Lightroom passed no collection id; searching the Gallera services')
+		Log.info(what .. ': no collection id from Lightroom; searching the Gallera services')
 	end
 	local wanted = {}
 	for _, id in ipairs(ids) do wanted[tostring(id)] = true end
@@ -81,6 +84,46 @@ local function collectionOf(ids, localCollectionId)
 	end
 	return nil
 end
+
+-- Lightroom order (D12) ---------------------------------------------------------------------
+
+-- Lightroom passes the collection's User Order as remote ids. Only 'Lightroom order' collections are sorted;
+-- photos added on the website go after the Lightroom ones. Failures are logged, never raised.
+function provider.imposeSortOrderOnPublishedCollection(publishSettings, info, remoteIdSequence)
+	-- info has no publishedCollection here, but localCollectionId (seen on 0.7.2).
+	Log.info('lightroom order:', #(remoteIdSequence or {}), 'photo id(s)')
+	local collection = collectionOf(remoteIdSequence or {}, info and info.localCollectionId, 'lightroom order')
+	if not collection then return Log.warn('lightroom order: collection not found') end
+	local mode = PhotoOrder.mode(CollectionStore.read(collection))
+	Log.info('lightroom order: collection', collection:getName(), 'mode', mode)
+	if mode ~= 'lightroom' then return end
+	local galleryId = tonumber(collection:getRemoteId())
+	if not galleryId then return end
+	local api = Auth.api(publishSettings)
+	if not api then return Log.warn('lightroom order: not logged in') end
+	local found, err = GalleryLookup.find(api, galleryId)
+	if not found then return Log.warn('lightroom order:', errorText(err)) end
+	if found.state ~= 'active' then return Log.info('lightroom order: gallery is', found.state) end
+	local photos
+	photos, err = api:listPhotos(found.slug)
+	if not photos then return Log.warn('lightroom order: cannot list the gallery photos:', errorText(err)) end
+	local current = {}
+	for _, p in ipairs(photos) do
+		local id = tonumber(p.id)
+		if id then current[#current + 1] = id end
+	end
+	local order = PhotoOrder.fromSequence { galleryPhotoIds = current, sequence = remoteIdSequence or {} }
+	local same = #order == #current
+	for i = 1, #order do
+		if order[i] ~= current[i] then same = false end
+	end
+	if same then return Log.info('lightroom order: gallery already in this order') end
+	local _, sortErr = api:sortPhotos(found.slug, order, nil)
+	if sortErr then return Log.warn('lightroom order: sorting failed:', errorText(sortErr)) end
+	Log.info('lightroom order: sorted', #order, 'photo(s)')
+end
+
+-- Removing photos (§6.5) --------------------------------------------------------------
 
 local RETRY = ' The removed photos stay listed; Publish again to retry.'
 
@@ -109,7 +152,7 @@ function provider.deletePhotosFromPublishedCollection(publishSettings, ids, dele
 		end
 	end
 
-	local collection = collectionOf(ids, localCollectionId)
+	local collection = collectionOf(ids, localCollectionId, 'remove photos')
 	if not collection then error('Gallera: could not find the published collection of the removed photos.' .. RETRY) end
 	local galleryId = tonumber(collection:getRemoteId())
 	if not galleryId then

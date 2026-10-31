@@ -1,7 +1,8 @@
 --[[ processRenderedPhotos (DESIGN.md §6.4): re-upload queued photos except unchanged ones in client favorites
      the user keeps (D30), check storage (D23), render (with the collection's size/quality override, D18),
      upload with retries (D25), record publish state and fingerprints (D30), delete replaced photos (D6),
-     keep or remove the rendered JPEGs (D24, D27). Originals are never touched (D22). ]]
+     keep or remove the rendered JPEGs (D24, D27), sort the gallery by capture time (D12). Originals are never touched (D22). ]]
+local LrApplication = import 'LrApplication'
 local LrBinding = import 'LrBinding'
 local LrDate = import 'LrDate'
 local LrDialogs = import 'LrDialogs'
@@ -18,6 +19,7 @@ local Fingerprint = require 'Fingerprint'
 local GalleryLookup = require 'GalleryLookup'
 local Log = require 'Log'
 local Names = require 'Names'
+local PhotoOrder = require 'PhotoOrder'
 local PublishPlan = require 'PublishPlan'
 local Uploader = require 'Uploader'
 
@@ -301,6 +303,58 @@ end
 
 -- D23: the free storage before the loop ({ free, limit }, or nil when unknown or unlimited), plus an error:
 -- CANCELLED, or an auth error for the login flow.
+-- Order (D12, §6.4 step 8) ---------------------------------------------------------------
+
+local function sameOrder(a, b)
+	if #a ~= #b then return false end
+	for i = 1, #a do
+		if a[i] ~= b[i] then return false end
+	end
+	return true
+end
+
+-- Sorts the gallery by capture time: every published photo of the collection (earlier records plus the ids
+-- recorded in this run, keyed by number to match listPhotos) gets its dateTimeOriginal, or false.
+local function orderByCapture(collection, api, slug, recorded)
+	local photoById = {}
+	for _, published in ipairs(collection:getPublishedPhotos()) do
+		local id = tonumber(published:getRemoteId())
+		if id then photoById[id] = published:getPhoto() end
+	end
+	for id, photo in pairs(recorded) do photoById[id] = photo end
+
+	local photos = {}
+	for _, photo in pairs(photoById) do photos[#photos + 1] = photo end
+	local raw = LrApplication.activeCatalog():batchGetRawMetadata(photos, { 'dateTimeOriginal' })
+	local captureTimes = {}
+	for id, photo in pairs(photoById) do
+		local t = raw[photo] and raw[photo].dateTimeOriginal
+		captureTimes[id] = type(t) == 'number' and t or false
+	end
+
+	local galleryPhotos, err = api:listPhotos(slug)
+	if not galleryPhotos then
+		Log.warn('publish: not ordered, cannot list the gallery photos:', errorText(err))
+		return
+	end
+	local current = {}
+	for _, p in ipairs(galleryPhotos) do
+		local id = tonumber(p.id)
+		if id then current[#current + 1] = id end
+	end
+	local order = PhotoOrder.compute { galleryPhotoIds = current, captureTimes = captureTimes }
+	if sameOrder(order, current) then
+		Log.info('publish: gallery already in capture order,', #order, 'photo(s)')
+		return
+	end
+	local _, sortErr = api:sortPhotos(slug, order, nil)
+	if sortErr then
+		Log.warn('publish: sorting failed:', errorText(sortErr))
+	else
+		Log.info('publish: sorted', #order, 'photo(s) by capture time')
+	end
+end
+
 local function storageCheck(api, slug, uploadCount)
 	if uploadCount == 0 then return nil end
 	local user, err = api:getUser()
@@ -391,6 +445,8 @@ local function run(exportContext, key)
 	local render = renderSettings(props)
 
 	local uploaded, failed, unchanged, held, oldIds, keptUploaded = 0, 0, 0, 0, {}, {}
+	-- Gallera photo id -> photo, for every id recorded in this run (the catalog shows them after the publish).
+	local recorded = {}
 	local authStopped, cancelled = false, false
 	-- Before the renditions loop: on Cancel the loop never starts, so nothing is rendered or recorded.
 	local function stopBeforeLoop(stopErr)
@@ -423,6 +479,7 @@ local function run(exportContext, key)
 				local rendered, path = rendition:waitForRender()
 				if rendered and path then LrFileUtils.delete(path) end
 				rendition:recordPublishedPhotoId(tostring(decision.remoteId))
+				recorded[tonumber(decision.remoteId)] = photo
 				if publicUrl then rendition:recordPublishedPhotoUrl(publicUrl) end
 				unchanged = unchanged + 1
 				Log.info('publish: unchanged photo', decision.remoteId, 'kept')
@@ -459,6 +516,7 @@ local function run(exportContext, key)
 						if storage then storage.free = math.max(0, storage.free - size) end
 						local oldId = tonumber(rendition.publishedPhotoId)
 						rendition:recordPublishedPhotoId(tostring(photoId))
+						recorded[tonumber(photoId)] = photo
 						if publicUrl then rendition:recordPublishedPhotoUrl(publicUrl) end
 						if oldId then oldIds[#oldIds + 1] = oldId end
 						fingerprints[photoKey] = decision.fingerprint or fingerprintOf(photo, render)
@@ -493,6 +551,11 @@ local function run(exportContext, key)
 		else
 			Log.warn('publish: deleting replaced photos failed:', deleteErr.kind, deleteErr.status, deleteErr.message)
 		end
+	end
+
+	if ok and not cancelled and not authStopped and PhotoOrder.mode(settings) == 'capture' then
+		local orderOk, orderErr = LrTasks.pcall(orderByCapture, collection, api, slug, recorded)
+		if not orderOk then Log.error('publish: ordering failed:', tostring(orderErr)) end
 	end
 
 	if not ok then Log.error('publish: stopped by an error:', tostring(loopErr)) end

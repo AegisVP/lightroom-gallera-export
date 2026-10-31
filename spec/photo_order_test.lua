@@ -52,3 +52,53 @@ function TestPhotoOrder:testCompleteList()
 	end
 	for _, id in ipairs(ids) do lu.assertTrue(seen[id]) end
 end
+
+-- Lightroom order (User Order, imposeSortOrderOnPublishedCollection) -------------------------
+
+function TestPhotoOrder:testLightroomSequenceFirst()
+	lu.assertEquals(PhotoOrder.fromSequence {
+		galleryPhotoIds = { 1, 2, 3 },
+		sequence = { 3, 1, 2 },
+	}, { 3, 1, 2 })
+end
+
+function TestPhotoOrder:testSequenceIdsMissingFromGalleryAreDropped()
+	lu.assertEquals(PhotoOrder.fromSequence {
+		galleryPhotoIds = { 1, 2 },
+		sequence = { 2, 99, 1 },
+	}, { 2, 1 })
+end
+
+function TestPhotoOrder:testWebsitePhotosLastInGalleryOrder()
+	lu.assertEquals(PhotoOrder.fromSequence {
+		galleryPhotoIds = { 7, 1, 8, 2 },
+		sequence = { 2, 1 },
+	}, { 2, 1, 7, 8 })
+end
+
+function TestPhotoOrder:testSequenceStringIdsMatchNumbers()
+	lu.assertEquals(PhotoOrder.fromSequence {
+		galleryPhotoIds = { 5, 6 },
+		sequence = { '6', '5', '6' },
+	}, { 6, 5 })
+end
+
+-- Order on Gallera setting -----------------------------------------------------------------
+
+function TestPhotoOrder:testModeDefaultsToCapture()
+	lu.assertEquals(PhotoOrder.mode {}, 'capture')
+end
+
+function TestPhotoOrder:testModeFromSetting()
+	lu.assertEquals(PhotoOrder.mode { galleryOrder = 'lightroom' }, 'lightroom')
+	lu.assertEquals(PhotoOrder.mode { galleryOrder = 'none', orderByCapture = true }, 'none')
+end
+
+function TestPhotoOrder:testModeFromOldCheckbox()
+	lu.assertEquals(PhotoOrder.mode { orderByCapture = false }, 'none')
+	lu.assertEquals(PhotoOrder.mode { orderByCapture = true }, 'capture')
+end
+
+function TestPhotoOrder:testUnknownModeFallsBack()
+	lu.assertEquals(PhotoOrder.mode { galleryOrder = 'random' }, 'capture')
+end

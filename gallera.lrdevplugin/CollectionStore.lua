@@ -1,4 +1,4 @@
---[[ Plugin-owned published collection settings (DESIGN.md §6.1): orderByCapture, overrideRender, longEdge,
+--[[ Plugin-owned published collection settings (DESIGN.md §6.1): galleryOrder (read with PhotoOrder.mode), overrideRender, longEdge,
      jpegQuality, folderId, deleted, jpegFiles, fingerprints, favoritesColors, favoritesSeen.
      Dialog-only keys (g_*, ui_*, link_*) are never read back as truth (D3). ]]
 local LrApplication = import 'LrApplication'
@@ -7,7 +7,7 @@ local GallerySettings = require 'GallerySettings'
 
 local CollectionStore = {}
 
-CollectionStore.DEFAULTS = { orderByCapture = true, overrideRender = false }
+CollectionStore.DEFAULTS = { overrideRender = false }
 
 -- Pass as a value to update() to remove a key (a Lua table can't carry nil).
 CollectionStore.CLEAR = {}

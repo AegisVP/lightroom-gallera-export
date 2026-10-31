@@ -28,7 +28,7 @@ A personal-use Lightroom Classic plugin that publishes finished photos as JPEGs 
 - Publish, re-publish (delete + upload), remove photos, rename the collection → rename the gallery, delete the collection (asks what to do with the gallery).
 - The gallery **Settings** tab (5 sections), edited from the collection settings dialog. **Gallera is the source of truth.**
 - JPEG rendering from the service's export settings, with a per-collection override of long edge size and JPEG quality.
-- Photo order by capture date (per-collection checkbox, on by default).
+- Photo order on Gallera, per collection: capture date (default), Lightroom's User Order, or don't change.
 - Client favorites → color labels. The user reviews the lists and picks a color for each one; nothing is applied automatically. Labels are mirrored without overwriting the user's own labels.
 - Deleted-gallery detection (during operations and at Lightroom startup), with a rename + flag marker.
 - Login with email/password once. Only the token is stored.
@@ -75,7 +75,7 @@ All are documented in `docs/gallera-api.md` unless noted.
 | D9 | Renaming the collection renames the gallery. A gallery renamed on the website later does not rename the collection. The exception is linking (D26) | Agreed default: the collection name stays under the user's control, and the settings dialog shows Gallera's current name. Name sync from Gallera could be added later if spike S3 shows `setName` works |
 | D10 | A deleted gallery is detected during any Gallera operation and once at Lightroom startup. The collection is renamed `<original name> - (deleted)` and flagged. The plugin never acts on its own | No "disabled" state exists in Lightroom; renaming is the only visible marker |
 | D11 | Deleted-gallery dialog: "This gallery was deleted[, but it is still available in Gallera trash]." Buttons: **[Restore]** (only if trashed) **[Create new]** **[Cancel]** | User choice |
-| D12 | Photo order: after each publish, sort Lightroom-published photos by capture time and send the full order. A per-collection checkbox **Order by capture date** (default on) | Gallera has no capture-date sort |
+| D12 | Photo order, a per-collection setting **Order on Gallera**: **Capture date** (default: after each publish, sort Lightroom-published photos by capture time and send the full order), **Lightroom order** (the collection's User Order, sent on every Publish through `imposeSortOrderOnPublishedCollection`; photos added on the website go last), **Don't change**. The plugin can't set Lightroom's order, so it only pushes Lightroom's order to the website | Gallera has no capture-date sort. User choice (2026-10-31, replacing the checkbox): the Lightroom and website orders should match, and reordering in Lightroom must reach the website |
 | D13 | Favorites are **never applied automatically**. A **Client favorites** dialog lists every favorites list (title, Finished / In progress, photo count). The user picks a color for each list: Skip / Red / Yellow / Green / Blue / Purple. The last choice for each list is remembered and pre-filled next time; new lists default to Skip | User choice: the photographer decides what each selection means |
 | D14 | Label mirroring, for each list given a color: add that color to the photos in the list. Remove it when a photo leaves the list, **only if** the plugin applied it from that list and the photo's label is still that color. Never overwrite a label the plugin didn't apply (report it as skipped). Which list and color the plugin applied is tracked in a hidden plugin metadata field. "Still that color" is checked with `colorNameForLabel` under the active label set (S6: Lightroom stores the label *text*, so after a label-set switch the color no longer matches and the photo is left alone) | The plugin only touches labels it can prove it set |
 | D15 | A list set to Skip is left entirely alone: its photos get no labels, and labels applied from it earlier are kept. Finished and unfinished lists are treated the same; the dialog only shows their status. A photo in two lists with **different** colors is left unchanged and reported as a conflict | Skipping never strips labels; the plugin never guesses |
@@ -230,6 +230,13 @@ PhotoOrder.compute{
 - Then Lightroom photos without a capture time, in their current gallery order.
 - Then photos the plugin didn't upload, in their current gallery order.
 
+```lua
+PhotoOrder.fromSequence{ galleryPhotoIds = {...}, sequence = { remote ids in Lightroom's User Order } } --> complete id list
+PhotoOrder.mode(collectionSettings) --> 'capture' | 'lightroom' | 'none'
+```
+- `fromSequence`: the sequence first (ids not in the gallery dropped), then the other gallery photos in gallery order.
+- `mode`: `galleryOrder`; collections saved with the old `orderByCapture = false` read as `'none'`; default `'capture'`.
+
 **`Fingerprint`** (D30) is pure logic.
 ```lua
 Fingerprint.of{ develop = <getDevelopSettings() table>, orientation = <string|nil>, render = <table of LR_* render keys> }
@@ -263,7 +270,7 @@ Fingerprint.of{ develop = <getDevelopSettings() table>, orientation = <string|ni
 | Publish service settings | `email` (not secret), `username` (for display), `jpegHandling` (`"ask"` (default), `"keep"` or `"remove"`), `jpegFolder`, plus the standard export settings |
 | `LrPasswords` | Token per email (`gallera.token:<email>`) |
 | Published collection `remoteId` / `remoteUrl` | Gallera gallery **id** / gallery `public_url` |
-| Collection settings (plugin-owned) | `favoritesColors` = `{ [listId] = color }` (last choices, to pre-fill the dialog), `favoritesSeen` = `{ [listId] = { count, finished } }` (to detect changed lists, D17), `orderByCapture` (default `true`), `overrideRender` (default `false`), `longEdge`, `jpegQuality`, `folderId` (always `nil` in the PoC), `deleted` = `nil` or `{ state, originalName }` (state is `"trashed"` or `"gone"`), `jpegFiles` = `{ [photo localIdentifier] = file name }` (D27), `fingerprints` = `{ [photo localIdentifier] = fingerprint of the uploaded version }` (D30) |
+| Collection settings (plugin-owned) | `favoritesColors` = `{ [listId] = color }` (last choices, to pre-fill the dialog), `favoritesSeen` = `{ [listId] = { count, finished } }` (to detect changed lists, D17), `galleryOrder` (`'capture'` (default), `'lightroom'` or `'none'`; the old `orderByCapture` checkbox is read by `PhotoOrder.mode`), `overrideRender` (default `false`), `longEdge`, `jpegQuality`, `folderId` (always `nil` in the PoC), `deleted` = `nil` or `{ state, originalName }` (state is `"trashed"` or `"gone"`), `jpegFiles` = `{ [photo localIdentifier] = file name }` (D27), `fingerprints` = `{ [photo localIdentifier] = fingerprint of the uploaded version }` (D30) |
 | Published photo | `publishedPhotoId` = Gallera photo id. `publishedPhotoUrl` = gallery `public_url` (Gallera has no known per-photo page) |
 | Photo custom metadata | `galleraLabelApplied` (`"<listId>:<color>"`) |
 | Originals | **Never modified or deleted** (D22). Only the color label changes |
@@ -319,10 +326,15 @@ Whenever a lookup (`GalleryLookup.find` or `getGallery`) returns a `public_url` 
    4. If the photo was already published (re-publish), remember its **old** remote id.
    5. **The rendered JPEG** (D24): move it from Lightroom's temp folder to `<folder>\<collection name>\`. It overwrites this photo's earlier JPEG (from `jpegFiles`). If the name belongs to a different photo, a `-2`, `-3`, … suffix is added (D27). The collection name is made safe for Windows: `<>:"/\|?*` are replaced with `_`. This happens whether the upload succeeded or failed. If the setting is **Always remove after upload** and the upload succeeded, delete it instead (`LrFileUtils.delete`).
 7. **Delete old versions:** `deletePhotos(slug, oldIds)` for re-published photos whose new upload succeeded (D6).
-8. **Order** (if `orderByCapture`): `listPhotos(slug)` (photos with a non-null `deleted_at` are left out, here and in the storage estimate), build `captureTimes` from Lightroom's `dateTimeOriginal` for this collection's published photos, `PhotoOrder.compute`, `sortPhotos(slug, ids, nil)`.
+8. **Order** (if Order on Gallera is **Capture date**; **Lightroom order** is sent by `imposeSortOrderOnPublishedCollection`, which Lightroom calls after the uploads, see §6.4a): `listPhotos(slug)` (photos with a non-null `deleted_at` are left out, here and in the storage estimate), build `captureTimes` from Lightroom's `dateTimeOriginal` for this collection's published photos, `PhotoOrder.compute`, `sortPhotos(slug, ids, nil)`.
 9. **Favorites check** (D17): `getFavorites(slug)`. If any list is new, or its `items_count` / `is_finished` differs from `favoritesSeen`, ask "Client favorites changed (list '<title>'…). Review now?" Yes → §6.8. Nothing is applied without the dialog.
 10. **Summary dialog** (only if there were failures or skipped labels): uploaded / failed / labels added, removed and skipped. If photos failed: "N photos failed to upload. They're still queued; click Publish to retry."
 11. **Keep, ask to remove** (the default setting): if at least one photo uploaded, ask "Remove the N uploaded JPEGs from `<folder>\<collection name>`?" **[Keep]** (default button) **[Remove]**. Remove deletes **only the JPEGs uploaded successfully in this publish**; failed ones stay. If the publish is cancelled or aborted midway, the JPEGs rendered so far have already been moved out of the temp folder (step 6.5), and the question covers the ones uploaded before the stop.
+
+### 6.4a Lightroom order (`imposeSortOrderOnPublishedCollection`)
+- The provider sets `supportsCustomSortOrder = true`, so published collections have Lightroom's User Order. Moving photos doesn't queue them; on every Publish (also with nothing queued) Lightroom calls `imposeSortOrderOnPublishedCollection(publishSettings, info, remoteIdSequence)` after the uploads, with every published photo's remote id in User Order. New photos can only be moved once they're published.
+- `info` has no `publishedCollection`; the collection is `catalog:getPublishedCollectionByLocalIdentifier(info.localCollectionId)`.
+- Only collections set to **Lightroom order**: `GalleryLookup.find` → `listPhotos` → `PhotoOrder.fromSequence` → `sortPhotos` (skipped when the order is already the same). Failures are logged only.
 
 ### 6.5 Removing photos (`deletePhotosFromPublishedCollection`)
 This runs after the user removes photos from the published collection and clicks Publish. It deletes the **Gallera copies** only. `deletedCallback` just tells Lightroom the remote copy is gone, so Lightroom drops its publish record. The originals stay in the catalog and on disk, untouched (D22).
@@ -426,7 +438,7 @@ Entry points: the **Gallera client favorites…** menu item (for the selected pu
 | | Hiding photos / client email | `allow_photo_hiding` + `photo_hiding_client_email` |
 
 **Plugin settings** (stored in Lightroom)
-- **Order by capture date:** a checkbox, default on.
+- **Order on Gallera:** a popup, Capture date (default) / Lightroom order (User Order) / Don't change, with the hint "Lightroom order: sort the collection by User Order and drag photos; Publish sends the order."
 - **Override size and quality:** a checkbox, plus long edge (px) and JPEG quality (0–100).
 - A **Client favorites…** button that opens the dialog in §7.3.
 
@@ -483,7 +495,7 @@ Each spike answers a yes/no question. A "no" changes the design. Record the resu
   - `GallerySettings`: `toProps`/`diff`/`apply` round-trip; `design`, `cover`, unknown fields, `null` values and empty objects are preserved through decode → apply → encode (D28).
   - `GalleryLookup`: active, trashed, gone, and a changed slug.
   - `FavoritesSync`: every rule in §5.2, incl. skipped lists left alone, the plugin's own label changed to a new color, a label the user set themselves (skipped), conflicting colors from two lists, removal only for lists chosen this run, a list that disappeared, and incomplete `latest`.
-  - `PhotoOrder`: capture order, ties, missing capture times, photos the plugin didn't upload.
+  - `PhotoOrder`: capture order, ties, missing capture times, photos the plugin didn't upload; Lightroom sequence order; the setting's mode.
   - `Fingerprint`: same inputs in a different table order give the same value; any change to a develop value, orientation or render setting gives a different one; float noise below the rounding doesn't.
 
 ### 9.3 Manual tests (Lightroom on Windows)
@@ -547,7 +559,7 @@ Other SDK facts from the spikes (also in CLAUDE.md): `LrPasswords.store(key, nil
 | Gallera favorites `latest[]` completeness | **Resolved (Task 15):** not complete. A list with `items_count` 6 returned 4 in `latest` (and 5 `lightroom_list` names), so names are matched as a fallback (§6.4 step 4). After a favorited photo is re-uploaded, the list still counts the old photo by name, so the new photo with that name is treated as a favorite too |
 | "Filename" ↔ `allow_caption` | Toggle it on the website, then compare the gallery object |
 | "People recognition" availability on the user's plan | Check `face_grouping_available` |
-| Whether `photos/sort` with `type: manual` changes `order_by` to manual | Read the gallery after the first sort |
+| ~~Whether `photos/sort` with `type: manual` changes `order_by` to manual~~ | **Resolved (Task 17, 0.7.x):** yes, after the plugin's sort the website's sort option shows Manual. In a manually ordered gallery Gallera puts a new upload first |
 | Whether `latest` is always complete for big lists | Capture a favorites list with more than 20 photos |
 | Token lifetime | Observe; the `auth` handling covers expiry |
 | Error shape for 422 (validation, e.g. a taken slug) | Capture once it happens; update `docs/gallera-api.md`. (The invalid-token shape is known: 403 `auth`) |

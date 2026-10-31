@@ -15,6 +15,7 @@ local CollectionStore = require 'CollectionStore'
 local GalleryLookup = require 'GalleryLookup'
 local GallerySettings = require 'GallerySettings'
 local Log = require 'Log'
+local PhotoOrder = require 'PhotoOrder'
 
 local CollectionSettingsDialog = {}
 
@@ -247,7 +248,21 @@ local function pluginView(f)
 	return f:group_box {
 		title = 'Lightroom',
 		fill_horizontal = 1,
-		f:checkbox { title = 'Order by capture date', value = bind 'orderByCapture' },
+		f:row {
+			f:static_text { title = 'Order on Gallera:' },
+			f:popup_menu {
+				value = bind 'galleryOrder',
+				items = {
+					{ title = 'Capture date', value = 'capture' },
+					{ title = 'Lightroom order (User Order)', value = 'lightroom' },
+					{ title = "Don't change", value = 'none' },
+				},
+			},
+		},
+		f:static_text {
+			title = 'Lightroom order: sort the collection by User Order and drag photos; Publish sends the order.',
+			fill_horizontal = 1,
+		},
 		f:row {
 			f:checkbox { title = 'Override size and quality:', value = bind 'overrideRender' },
 			f:static_text { title = 'Long edge (px)' },
@@ -265,7 +280,7 @@ function CollectionSettingsDialog.viewForCollectionSettings(f, publishSettings, 
 	local galleryId = tonumber(remoteId)
 	session = { galleryId = galleryId }
 
-	if cs.orderByCapture == nil then cs.orderByCapture = true end
+	cs.galleryOrder = PhotoOrder.mode(cs)
 	if cs.overrideRender == nil then cs.overrideRender = false end
 	if cs.longEdge == nil then cs.longEdge = DEFAULT_LONG_EDGE end
 	if cs.jpegQuality == nil then cs.jpegQuality = DEFAULT_QUALITY end
