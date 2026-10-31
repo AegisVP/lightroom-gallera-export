@@ -87,7 +87,7 @@ All are documented in `docs/gallera-api.md` unless noted.
 | D23 | Storage: before uploading, compare the estimated publish size with free Gallera storage. If it may not fit, warn with **Continue anyway** / **Cancel**. During upload, stop when the next file truly doesn't fit | User choice |
 | D18 | Rendering: JPEG only. The service holds the full Lightroom export settings. Each collection can override **long edge** and **JPEG quality**. Mechanism (S1 variant A): in `processRenderedPhotos`, before the first `exportContext:renditions()` call, write the override's `LR_size_*` / `LR_jpeg_quality` into `exportContext.propertyTable`, and restore the saved values when the loop ends (also on error) | User choice; proven by spike S1 |
 | D19 | Auth: email/password entered once, sent to `auth/login`, and **only the token is stored** (`LrPasswords`). Log out revokes the token. No automatic re-login (the password isn't stored) | The user doesn't want passwords saved; browser login isn't possible (no OAuth) |
-| D20 | One Gallera account per publish service | User choice |
+| D20 | One Gallera account per publish service. Checked after each **Log in**: if the service has linked collections and the account owns none of their galleries (active or trashed), the dialog says they belong to another account and offers **[Log out]** (default) / **[Keep this account]** | User choice; the check (2026-10-31) keeps another account's login from making every linked gallery look deleted |
 | D21 | Layered architecture: a Lightroom-free core (unit-tested) plus a thin Lightroom layer | Must grow over time (scenes, design) |
 | D26 | Linking an existing gallery renames the collection to the gallery's name. The picker hides galleries that another collection of this service is already linked to | User choice: the gallery wins on link |
 | D27 | Kept JPEGs (D24) are tracked per collection as `jpegFiles = { [photo localIdentifier] = file name }`. A re-render of the same photo overwrites its own file. If the name is taken by a different photo, a suffix is added: `name-2.jpg`, `name-3.jpg`, … The uploaded `filename` stays the rendered name without the suffix | User choice; collisions are unlikely but must never overwrite another photo's JPEG |
@@ -387,6 +387,8 @@ Entry points: the **Gallera client favorites…** menu item (for the selected pu
 - **Gallera account** section (top):
   - Logged out: an email field and a **Log in…** button.
   - Logged in: "Logged in as `<username>` · `<used>` / `<limit>` GB used" and a **Log out** button.
+  - After a login: the D20 account check (`GalleryLookup.ownsAny` over `listGalleries` + `listTrashedGalleries`).
+  - Save stays disabled on login/logout (the token is in `LrPasswords`, not in the settings). `startDialog` sets `LR_includeVideoFiles = false` first: Lightroom doesn't keep it in the saved settings and its own reset to `false` (`canExportVideo = false`) enabled Save and made every Save ask to re-publish all photos.
 - **Lightroom's standard sections:** File Naming, Image Sizing, Output Sharpening, Metadata, Watermarking.
   - `allowFileFormats = { 'JPEG' }`, `canExportVideo = false`.
   - Hide Export Location (and any section that doesn't apply to publishing).

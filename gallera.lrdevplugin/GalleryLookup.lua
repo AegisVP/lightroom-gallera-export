@@ -37,4 +37,15 @@ function GalleryLookup.find(api, galleryId)
 	return GalleryLookup.index(active, trashed)(galleryId)
 end
 
+-- D20: true when the account's galleries (active or trashed) include one of the service's linked gallery ids,
+-- or when nothing is linked yet. False means the collections belong to another Gallera account.
+function GalleryLookup.ownsAny(linkedIds, activeList, trashedList)
+	if #linkedIds == 0 then return true end
+	local lookup = GalleryLookup.index(activeList, trashedList)
+	for _, id in ipairs(linkedIds) do
+		if lookup(id).state ~= 'gone' then return true end
+	end
+	return false
+end
+
 return GalleryLookup

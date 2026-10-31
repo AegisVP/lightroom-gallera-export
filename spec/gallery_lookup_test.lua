@@ -69,3 +69,14 @@ function TestGalleryLookup:testIndexPrefersActive()
 	lu.assertEquals(lookup(2).state, 'trashed')
 	lu.assertEquals(lookup(9).state, 'gone')
 end
+
+-- D20: one Gallera account per publish service. After a login, the account must own a linked gallery.
+function TestGalleryLookup:testOwnsAnyLinkedGallery()
+	lu.assertTrue(GalleryLookup.ownsAny({ 5, 7 }, { { id = 1 }, { id = 7 } }, {}))
+	lu.assertTrue(GalleryLookup.ownsAny({ '5' }, {}, { { id = 5 } }))   -- in the trash still counts
+	lu.assertFalse(GalleryLookup.ownsAny({ 5, 7 }, { { id = 1 } }, { { id = 2 } }))
+end
+
+function TestGalleryLookup:testAnyAccountOwnsAServiceWithoutLinkedGalleries()
+	lu.assertTrue(GalleryLookup.ownsAny({}, {}, {}))
+end

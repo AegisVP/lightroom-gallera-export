@@ -7,6 +7,7 @@ local LrTasks = import 'LrTasks'
 local LrView = import 'LrView'
 
 local Auth = require 'Auth'
+local GalleryLookup = require 'GalleryLookup'
 local Log = require 'Log'
 
 local ServiceSettingsDialog = {}
@@ -72,6 +73,49 @@ function ServiceSettingsDialog.startDialog(propertyTable)
 	end
 end
 
+-- D20, one Gallera account per publish service: after a login, the account must own one of the galleries this
+-- service's collections are linked to. Otherwise the collections belong to another account; offer to log out.
+local function checkAccount(propertyTable, email)
+	local service = propertyTable.LR_publishService
+	local ok, collections = LrTasks.pcall(function() return service and service:getChildCollections() or {} end)
+	if not ok then
+		Log.warn('account check skipped: no publish service:', tostring(collections))
+		return
+	end
+	local ids, names = {}, {}
+	for _, c in ipairs(collections) do
+		local id = tonumber(c:getRemoteId())
+		if id then
+			ids[#ids + 1] = id
+			if #names < 3 then names[#names + 1] = "'" .. c:getName() .. "'" end
+		end
+	end
+	if #ids > #names then names[#names + 1] = '…' end
+	if #ids == 0 then return end
+
+	local api = Auth.api(propertyTable)
+	local active, err = api and api:listGalleries()
+	local trashed
+	if active then trashed, err = api:listTrashedGalleries() end
+	if not (active and trashed) then
+		Log.warn('account check skipped:', err and err.kind, err and err.message)
+		return
+	end
+	local owns = GalleryLookup.ownsAny(ids, active, trashed)
+	Log.info('account check:', #ids, 'linked collection(s), account owns one:', tostring(owns))
+	if owns then return end
+	local answer = LrDialogs.confirm(
+		'This Gallera account has none of the galleries this publish service is linked to.',
+		'The collections ' .. table.concat(names, ', ') .. ' belong to another Gallera account. ' ..
+			'Use a separate Gallera publish service for this account.',
+		'Log out', 'Keep this account')
+	if answer == 'ok' then
+		Auth.logout(email)
+		propertyTable.ui_username = ''
+		showLoggedOut(propertyTable, "Logged out: this account does not own this service's galleries.")
+	end
+end
+
 local function logIn(propertyTable)
 	LrFunctionContext.postAsyncTaskWithContext('Gallera login', function(context)
 		LrDialogs.attachErrorDialogToFunctionContext(context)
@@ -119,6 +163,7 @@ local function logIn(propertyTable)
 		end
 		propertyTable.ui_username = type(user.username) == 'string' and user.username or ''
 		showLoggedIn(propertyTable, user)
+		checkAccount(propertyTable, email)
 	end)
 end
 
