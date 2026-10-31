@@ -199,6 +199,15 @@ function GalleraApi:trashGallery(galleryId)
 	if not slug then
 		return fail('api', nil, 'The gallery is not active on Gallera; it was not deleted.')
 	end
+	-- The DELETE goes by slug, and on a trashed gallery it deletes permanently: if the trash holds a gallery
+	-- with the same slug (or can't be read), don't risk it.
+	local trashed, trashErr = self:listTrashedGalleries()
+	if not trashed then return nil, trashErr end
+	for _, g in ipairs(trashed) do
+		if g.slug == slug then
+			return fail('api', nil, 'A gallery in the Gallera trash has the same address; the gallery was not deleted.')
+		end
+	end
 	local _, deleteErr = self:call('DELETE', 'galleries/' .. slug .. '/delete')
 	if deleteErr then return nil, deleteErr end
 	return true

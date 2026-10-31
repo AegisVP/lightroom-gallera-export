@@ -78,6 +78,7 @@ Read-only fields of interest: `id`, `public_url` (e.g. `https://<username>.galle
   - On an active gallery → `"Gallery moved to deleted list."` A soft delete into the trash; the gallery keeps its `id` and `slug`.
   - On a gallery **already in the trash** → `"Gallery deleted."` A permanent delete. There's no separate endpoint, so calling delete twice in a row destroys the gallery.
 - `POST galleries/{slug}/restore` (no body) → success, and the gallery is back in `v2/galleries/my`.
+- The plugin never sends the DELETE when `galleries/my/deleted` holds a gallery with the same slug (it isn't known whether a trashed and an active gallery can share a slug; if they could, the call might hit the trashed one and delete it permanently).
 - Trashed galleries **don't appear** in `v2/galleries/my`, only in `galleries/my/deleted`. If a stored id isn't found in the main list, check the trash before treating the gallery as gone.
 - Other slug-based calls on a trashed gallery fail (e.g. `GET galleries/{slug}/stats` → 404 `notFound`).
 - There's no "empty trash" for all galleries at once. Trashed galleries that aren't permanently deleted are removed with their photos **7 days** after deletion (per the user, not seen in traffic).

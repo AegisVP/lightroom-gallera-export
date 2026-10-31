@@ -189,6 +189,33 @@ function PublishPlan.inGallery(ids, galleryPhotos)
 	return out
 end
 
+-- D27: kept-JPEG names are only the photo's own in the folder they were written to. In another folder (the
+-- JPEG folder setting changed, or the collection was renamed) or an unknown one, start with an empty map, so
+-- a same-named file there is never overwritten or deleted. Windows paths compare without case.
+function PublishPlan.jpegFilesFor(files, storedFolder, folder)
+	if type(storedFolder) == 'string' and type(folder) == 'string' and storedFolder:lower() == folder:lower() then
+		return files or {}
+	end
+	return {}
+end
+
+-- D6: replaced photos to delete now: the ones left from an earlier publish (pending) plus this publish's,
+-- once each, as numbers, and only those still in the gallery when its photo list is known.
+function PublishPlan.replacedToDelete(pending, oldIds, galleryPhotos)
+	local all, seen = {}, {}
+	for _, list in ipairs { pending or {}, oldIds or {} } do
+		for _, id in ipairs(list) do
+			local n = tonumber(id)
+			if n and not seen[n] then
+				seen[n] = true
+				all[#all + 1] = n
+			end
+		end
+	end
+	if galleryPhotos then return PublishPlan.inGallery(all, galleryPhotos) end
+	return all
+end
+
 local JPEG_HANDLING = { ask = true, keep = true, remove = true }
 
 -- D24: the collection's Uploaded JPEGs choice ('ask' | 'keep' | 'remove'), or the service's when the collection

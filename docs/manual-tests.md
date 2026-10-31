@@ -14,7 +14,7 @@ Before you start:
 
 | # | Do | Expect |
 |---|---|---|
-| 1.1 | Set up a Gallera publish service. Log in with a wrong password | Gallera's message ("Пароль введено невірно"); nothing stored; still logged out |
+| 1.1 | Set up a Gallera publish service. Log in with a wrong password | "The email or password is wrong." (English, whatever the account language); nothing stored; the window shows Not logged in |
 | 1.2 | Log in correctly | Username and storage use are shown |
 | 1.3 | Close the service settings with **Cancel** (Save stays disabled: logging in changes no saved setting) and reopen them | Still logged in || 1.4 | Log out | Logged out; the log shows `auth/logout` 200 |
 | 1.5 | Log in with a **different** Gallera account on a service that has linked collections | "This Gallera account has none of the galleries…" with **Log out** / **Keep this account** (D20). Galleries in the trash still count as owned |
@@ -27,7 +27,7 @@ Before you start:
 | 2.2 | Create a collection with **Link existing gallery** | After ~1 s the collection takes the gallery's name (D26). A gallery already linked to another collection isn't in the picker |
 | 2.3 | Edit Collection | "Loading from Gallera…", then the Settings fields fill in |
 | 2.4 | Change a field in each section (General, Scenes, Favorites, Saving, Access), OK | The website shows each change; the gallery's design is unchanged |
-| 2.5 | Enter a slug that's already taken | Gallera's message is shown |
+| 2.5 | Enter a slug that's already taken | "The address '…' can't be used: another of your galleries may already have it. Choose a different address." |
 | 2.6 | Reopen Edit Collection after 2.4 | No `g_password` / dialog keys are kept in the catalog (log shows none) |
 | 2.7 | Rename the collection in the Publish Services panel | The gallery is renamed on the website |
 
@@ -47,6 +47,8 @@ drawn narrow with the name cropped until the panel is resized. The plugin doesn'
 | 3.7 | Service setting **Always remove after upload**, publish | No question; uploaded JPEGs deleted |
 | 3.7a | Collection **Uploaded JPEGs** = Always keep while the service says Always remove; publish | No question; the JPEG is kept (the collection wins). Back to **Service setting**: the service's choice applies again |
 | 3.8 | Name a collection `a/b.` and publish | The JPEG folder `a_b` is created |
+| 3.8a | Collection with a kept JPEG `X.jpg`. Put an unrelated file named `X.jpg` into `<folder>\<new name>\`, rename the collection to `<new name>`, re-publish the photo | The unrelated `X.jpg` is untouched; the new JPEG is `X-2.jpg`; the old folder is untouched |
+| 3.8b | Cyrillic collection name and file name (e.g. `Весілля`, `Фото_001`) | Gallery name, folder and Gallera file name keep the Cyrillic text |
 | 3.9 | Disconnect the network mid-publish | The log shows retries (2 s, 5 s); the photo is reported failed and still queued. Reconnect, Publish: it uploads |
 | 3.10 | Cancel a publish midway (the progress bar's X) | The rest stay queued; JPEGs rendered so far are in the collection folder; the temp folder is empty. Lightroom's list: "Not rendered: the publish was cancelled. Still queued…" for the photo being rendered, and Lightroom's own "An unknown error occurred. This photo was not rendered." for the photos it never handed over |
 | 3.11 | Log out, then Publish | The run stops at once with the login message; photos stay queued |

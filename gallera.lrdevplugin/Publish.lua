@@ -443,6 +443,8 @@ local function run(exportContext, key)
 		root = LrPathUtils.child(LrPathUtils.getStandardFilePath('pictures'), 'Gallera')
 	end
 	local folder = LrPathUtils.child(root, Names.safeFolder(collection:getName()))
+	-- D27: the stored names belong to the folder they were written to; in another folder they're not ours.
+	jpegFiles = PublishPlan.jpegFilesFor(jpegFiles, settings.jpegFolderPath, folder)
 	local folderOk = LrTasks.pcall(function() LrFileUtils.createAllDirectories(folder) end) and LrFileUtils.exists(folder)
 	if not folderOk then Log.warn('publish: cannot create the JPEG folder; rendered files stay in the temp folder') end
 
@@ -583,21 +585,27 @@ local function run(exportContext, key)
 		setBackup(key, nil)
 	end
 
-	-- D6: replaced photos are deleted only after their new version uploaded.
-	-- Only ids still in this gallery: one foreign id (e.g. from a gallery deleted and re-created, §6.9)
-	-- fails the whole photos/delete call with 422.
-	if #oldIds > 0 and not authStopped then
-		local galleryPhotos = api:listPhotos(slug)
-		if galleryPhotos then oldIds = PublishPlan.inGallery(oldIds, galleryPhotos) end
-	end
-	if #oldIds > 0 and not authStopped then
-		local deleted, deleteErr = api:deletePhotos(slug, oldIds)
-		if deleted then
-			Log.info('publish: deleted', #deleted, 'replaced photo(s)')
-		else
-			Log.warn('publish: deleting replaced photos failed:', deleteErr.kind, deleteErr.status, deleteErr.message)
+	-- D6: replaced photos are deleted only after their new version uploaded. Ones whose delete didn't happen
+	-- (login expired, failed call) are kept in pendingDeletes and retried by the next publish; Lightroom no
+	-- longer knows their ids. Only ids still in this gallery are sent: one foreign id (e.g. from a gallery
+	-- deleted and re-created, §6.9) fails the whole photos/delete call with 422.
+	local pending = settings.pendingDeletes or {}
+	local leftOver = {}
+	if not cancelled and authStopped then
+		leftOver = PublishPlan.replacedToDelete(pending, oldIds, nil)
+	elseif not cancelled and (#oldIds > 0 or #pending > 0) then
+		local toDelete = PublishPlan.replacedToDelete(pending, oldIds, api:listPhotos(slug))
+		if #toDelete > 0 then
+			local deleted, deleteErr = api:deletePhotos(slug, toDelete)
+			if deleted then
+				Log.info('publish: deleted', #deleted, 'replaced photo(s)')
+			else
+				leftOver = toDelete
+				Log.warn('publish: deleting replaced photos failed:', deleteErr.kind, deleteErr.status, deleteErr.message)
+			end
 		end
 	end
+	if #leftOver > 0 then Log.warn('publish:', #leftOver, 'replaced photo(s) left to delete at the next publish') end
 
 	if ok and not cancelled and not authStopped and PhotoOrder.mode(settings) == 'capture' then
 		local orderOk, orderErr = LrTasks.pcall(orderByCapture, collection, api, slug, recorded)
@@ -624,7 +632,12 @@ local function run(exportContext, key)
 		end
 	end
 
-	if not cancelled then CollectionStore.update(collection, { jpegFiles = jpegFiles, fingerprints = fingerprints }) end
+	if not cancelled then
+		CollectionStore.update(collection, {
+			jpegFiles = jpegFiles, jpegFolderPath = folder, fingerprints = fingerprints,
+			pendingDeletes = #leftOver > 0 and leftOver or CollectionStore.CLEAR,
+		})
+	end
 
 	-- D17 (§6.4 step 9) runs in imposeSortOrderOnPublishedCollection: Lightroom calls it on every Publish.
 	if not ok then error(loopErr, 0) end

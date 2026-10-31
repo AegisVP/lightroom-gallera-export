@@ -209,3 +209,38 @@ function TestPublishPlan:testJpegHandlingDefaultIsAsk()
 	lu.assertEquals(PublishPlan.jpegHandling(nil, nil), 'ask')
 	lu.assertEquals(PublishPlan.jpegHandling('bogus', 'bogus'), 'ask')
 end
+
+-- Kept JPEGs (D24, D27): file names are only the photo's own in the folder they were written to (final review:
+-- after a folder change or a collection rename, a same-named file in the new folder isn't the plugin's)
+
+function TestPublishPlan:testJpegFilesForSameFolder()
+	local files = { ['1'] = 'a.jpg' }
+	lu.assertEquals(PublishPlan.jpegFilesFor(files, 'L:\Gallera\X', 'L:\Gallera\X'), files)
+end
+
+function TestPublishPlan:testJpegFilesForSameFolderAnyCase()
+	lu.assertEquals(PublishPlan.jpegFilesFor({ ['1'] = 'a.jpg' }, 'L:\Gallera\x', 'l:\gallera\X'), { ['1'] = 'a.jpg' })
+end
+
+function TestPublishPlan:testJpegFilesForOtherFolderStartsEmpty()
+	lu.assertEquals(PublishPlan.jpegFilesFor({ ['1'] = 'a.jpg' }, 'L:\Gallera\X', 'D:\Clients\X'), {})
+end
+
+function TestPublishPlan:testJpegFilesForUnknownFolderStartsEmpty()
+	lu.assertEquals(PublishPlan.jpegFilesFor({ ['1'] = 'a.jpg' }, nil, 'L:\Gallera\X'), {})
+end
+
+-- Replaced photos (D6) whose delete didn't happen (auth stop, failed call) are kept and retried next publish
+
+function TestPublishPlan:testReplacedToDeleteMergesPendingAndNew()
+	local gallery = { { id = 1 }, { id = 2 }, { id = 3 } }
+	lu.assertEquals(PublishPlan.replacedToDelete({ 1, 2 }, { 2, 3 }, gallery), { 1, 2, 3 })
+end
+
+function TestPublishPlan:testReplacedToDeleteDropsIdsNotInGallery()
+	lu.assertEquals(PublishPlan.replacedToDelete({ 7 }, { 3 }, { { id = 3 } }), { 3 })
+end
+
+function TestPublishPlan:testReplacedToDeleteWithoutGalleryListKeepsAll()
+	lu.assertEquals(PublishPlan.replacedToDelete({ '7' }, { 3 }, nil), { 7, 3 })
+end

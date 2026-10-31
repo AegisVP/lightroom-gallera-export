@@ -131,6 +131,7 @@ end
 
 function TestGalleraApiPhotos:testTrashGalleryDeletesActiveOnce()
 	self.fake:respond(200, ok { galleries = { { id = 837261, slug = 'x' } }, pagination = { has_more = false } })
+	self.fake:respond(200, ok { galleries = { { id = 5, slug = 'old' } } })   -- the trash: no slug 'x'
 	self.fake:respond(200, ok {})
 	lu.assertEquals(self.api:trashGallery('837261'), true)
 	local deletes = {}
@@ -142,6 +143,7 @@ end
 
 function TestGalleraApiPhotos:testTrashGalleryNetworkFailureIsNotRetried()
 	self.fake:respond(200, ok { galleries = { { id = 837261, slug = 'x' } }, pagination = { has_more = false } })
+	self.fake:respond(200, ok {})
 	self.fake:failNetwork('timeout')
 	local r, err = self.api:trashGallery(837261)
 	lu.assertNil(r)
@@ -151,4 +153,27 @@ function TestGalleraApiPhotos:testTrashGalleryNetworkFailureIsNotRetried()
 		if req.method == 'DELETE' then deletes = deletes + 1 end
 	end
 	lu.assertEquals(deletes, 1)
+end
+
+-- DELETE galleries/{slug}/delete permanently deletes a gallery that is already in the trash. If a trashed
+-- gallery had the same slug as the active one, the call could hit it, so the plugin refuses (final review).
+function TestGalleraApiPhotos:testTrashGalleryRefusesSlugAlsoInTrash()
+	self.fake:respond(200, ok { galleries = { { id = 837261, slug = 'x' } }, pagination = { has_more = false } })
+	self.fake:respond(200, ok { galleries = { { id = 99, slug = 'x' } } })
+	local r, err = self.api:trashGallery(837261)
+	lu.assertNil(r)
+	lu.assertEquals(err.kind, 'api')
+	for _, req in ipairs(self.fake.requests) do
+		lu.assertNotEquals(req.method, 'DELETE')
+	end
+end
+
+function TestGalleraApiPhotos:testTrashGalleryRefusesWhenTrashUnreadable()
+	self.fake:respond(200, ok { galleries = { { id = 837261, slug = 'x' } }, pagination = { has_more = false } })
+	self.fake:respond(500, { status = 'error', message = 'Server Error' })
+	local r, err = self.api:trashGallery(837261)
+	lu.assertNil(r)
+	for _, req in ipairs(self.fake.requests) do
+		lu.assertNotEquals(req.method, 'DELETE')
+	end
 end
