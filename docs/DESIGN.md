@@ -92,8 +92,8 @@ All are documented in `docs/gallera-api.md` unless noted.
 | D26 | Linking an existing gallery renames the collection to the gallery's name. The picker hides galleries that another collection of this service is already linked to | User choice: the gallery wins on link |
 | D27 | Kept JPEGs (D24) are tracked per collection as `jpegFiles = { [photo localIdentifier] = file name }`. A re-render of the same photo overwrites its own file. If the name is taken by a different photo, a suffix is added: `name-2.jpg`, `name-3.jpg`, … The uploaded `filename` stays the rendered name without the suffix | User choice; collisions are unlikely but must never overwrite another photo's JPEG |
 | D28 | JSON: bundled **dkjson** (pure Lua, MIT), not rxi/json.lua. It keeps JSON `null` (`json.null`) and tells empty objects from empty arrays, so a gallery object read with GET and saved back keeps every field as it was | rxi drops `null` keys and writes `{}` as `[]`, which would change `design`/`cover` on save (D4) |
-| D30 | **Only picture changes re-upload a photo; metadata never counts as a change.** At each upload the plugin stores a fingerprint of what shapes the pixels: the photo's develop settings (crop included), its orientation, and the effective render settings (service settings + collection override: size, quality, sharpening, watermark, color space). On publish, a photo Lightroom calls modified whose fingerprint is unchanged keeps its Gallera photo: it's recorded as published again with the same remote id and nothing is uploaded or deleted. Consequence: changed titles, keywords or copyright in the JPEG reach Gallera only with the next picture change | User choice. Lightroom marks photos modified on any metadata change, labels included, and `metadataThatTriggersRepublish` can't prevent that (S7). A re-upload gets a new photo id and loses the client's favorites |
-| D31 | Before re-uploading photos that are in a client favorites list (picture changed, D30), the publish warns: "N of the photos to re-publish are in client favorites ('<list>', …). Re-uploading removes them from those lists." **[Re-upload anyway]** **[Skip these]**. Skipped photos fail with "Skipped: in client favorites" and stay queued | User choice: never lose a client's selection silently |
+| D30 | **A queued photo re-uploads, with one guard for client favorites.** Lightroom queues a published photo only on a develop change or a manual *Mark to Re-publish*; title, rating and label edits don't queue it (seen on 0.5.0). Every queued photo re-uploads and replaces its earlier version (D6). The guard: queued photos whose Gallera photo is in a client favorites list are listed in one dialog (thumbnail, file name, the lists it's in, **Picture changed** when it changed, a checkbox each, none checked; **Select all** / **Select none** / **Select changed**). **[Re-upload checked]** re-uploads the checked ones. Unchecked unchanged photos keep their Gallera photo and are recorded as published again with the same remote id; unchecked changed photos fail with "Not re-uploaded: in client favorites" and stay queued (Gallera still has the old picture). **[Cancel]** stops the whole publish without any change (nothing rendered, uploaded or recorded). "Changed" comes from a fingerprint stored at each upload of what shapes the pixels: develop settings (crop included), orientation, and the effective render settings (service settings + collection override), so a changed collection size/quality counts as a picture change | User choice (2026-10-31, replacing the earlier "metadata never counts" rule and D31's separate warning). A re-upload gets a new photo id and loses the client's favorites on it |
+| D31 | *Merged into D30 (2026-10-31).* The separate warning before re-uploading photos in client favorites is gone; the D30 dialog lists every queued photo in client favorites, changed or not | User choice: one dialog |
 | D29 | Unit tests use **luaunit** (vendored `spec/luaunit.lua`) on a portable Lua 5.1 in the gitignored `tools/lua51/`. Run: `tools\lua51\lua5.1.exe spec\run.lua` | busted needs C modules and a compiler. The user doesn't want the machine's setup changed |
 
 ## 5. Architecture
@@ -116,7 +116,7 @@ gallera.lrdevplugin/
   Redact.lua                     -- masks secrets before logging (§8)
   Names.lua                      -- deleted marker, Windows-safe folder names, kept-JPEG names (D27)
   Uploader.lua                   -- one photo's 3-step upload with D25 retries
-  PublishPlan.lua                -- classify (D30/D31), storage estimate (D23), confirmed deletes
+  PublishPlan.lua                -- classify + favorites guard (D30), storage estimate (D23), confirmed deletes
   -- Lightroom layer
   LrHttpAdapter.lua
   Auth.lua
@@ -302,11 +302,12 @@ Whenever a lookup (`GalleryLookup.find` or `getGallery`) returns a `public_url` 
    - **Estimate** = number of photos to upload × the average `filesize` of photos already in this gallery (`listPhotos`). For an empty gallery, use 8 MB per photo (a conservative full-resolution JPEG).
    - If estimate > free: "Gallera has X MB free. This publish is estimated at ~Y MB (N photos)." **[Continue anyway]** **[Cancel]**. Cancel aborts before anything is rendered or uploaded.
    - During upload, track `free`. If the next file is larger, stop uploading and mark the rest as failed: "Gallera storage full (used X of Y)".
-4. **Classify** (D30, D31): for every photo in the publish, compute its fingerprint.
-   - Already published and the fingerprint equals `fingerprints[photo]` → **unchanged**: skip its render (`rendition:skipRender()`; if that turns out not to work, render and discard), `recordPublishedPhotoId` with the **same** remote id, and nothing is uploaded or deleted.
-   - Otherwise → **upload** (new photo, or a picture change).
-   - If any re-upload's old remote id is in a favorites list (`getFavorites(slug)`, matched by id), show the D31 warning. **Skip these** fails those renditions with "Skipped: in client favorites"; they stay queued.
-   - The storage pre-check (step 3) counts only the photos to upload, minus those skipped here.
+4. **Classify** (D30): for every photo in the publish, compute its fingerprint.
+   - Already published and the fingerprint equals `fingerprints[photo]` → **unchanged**; otherwise (new photo, picture change) → **changed**.
+   - If any queued photo is already on Gallera: `getFavorites(slug)`, matched by remote id. A list whose `latest[]` is shorter than `items_count` (seen: 4 of 6) also matches its `lightroom_list` names against `original_filename` from `listPhotos` (no extension, any case; an ambiguous name marks every photo that has it). If the favorites can't be read, every queued photo on Gallera counts as in a list.
+   - Not in any list → **upload**. In a list → the D30 dialog: checked → **upload**; unchecked and unchanged → **kept**: render and discard (`skipRender()` throws once the renditions loop has started), `recordPublishedPhotoId` with the **same** remote id, nothing uploaded or deleted; unchecked and changed → **held**: render, discard, `uploadFailed("Not re-uploaded: in client favorites. Still queued…")`.
+   - **Cancel** in the dialog stops the publish before the renditions loop: nothing is rendered, uploaded or recorded, and the photos stay queued (seen on 0.5.7).
+   - The storage pre-check (step 3) counts only the photos to upload.
 5. **Render:** with the service settings, or with the collection override (D18: set the override in `exportContext.propertyTable` before the renditions loop, restore it afterwards, also on error). Two publishes of the same service at the same time would share that table, so the plugin allows only one publish of the service at a time (a module-level busy flag; a second one waits).
 6. **Per rendition** (photo):
    1. `requestUpload` (filename = the rendered file's name) → `putFile` → `confirmUpload`. The URL is requested immediately before the PUT.
@@ -391,7 +392,7 @@ Entry points: the **Gallera client favorites…** menu item (for the selected pu
   - Hide Export Location (and any section that doesn't apply to publishing).
   - File naming is under the user's control; the plugin never renames files (D16).
 - **Uploaded JPEGs** section (D24): a popup (Keep, ask to remove after publish / Always keep / Always remove after upload) and a folder field with **Choose…**; default `Pictures\Gallera`.
-- **`metadataThatTriggersRepublish`:** `{ default = false }`, because metadata isn't a change (D30). Lightroom still marks photos modified on label changes (S7) and maybe on other metadata. The publish then sees an unchanged fingerprint and uploads nothing (§6.4 step 4). The favorites flow also clears the flags it caused (§6.8 step 4), so the queue stays clean.
+- **`metadataThatTriggersRepublish`:** `{ default = false }`, so metadata edits don't queue photos (D30). On 0.5.0, title, rating and label edits made in Lightroom's UI didn't queue a photo; S7 saw a label written by the plugin (`setRawMetadata`) mark it modified, so the favorites flow clears the flags it caused (§6.8 step 4), keeping the queue to real changes and manual marks.
 
 ### 7.2 Collection settings dialog
 **Gallery** (top)
@@ -539,8 +540,9 @@ Other SDK facts from the spikes (also in CLAUDE.md): `LrPasswords.store(key, nil
 |---|---|
 | Clearing a label with `setRawMetadata('colorNameForLabel', 'none')` (or `''`) | Not tried in the spikes; check during implementation of §6.8 |
 | Whether a flag cleared with `setEditedFlag(false)` stays cleared after a Lightroom restart | Check during the manual test pass |
-| Whether `rendition:skipRender()` works for unchanged photos and still lets `recordPublishedPhotoId` mark them published (D30) | Not tried (S1 variant B wasn't run). Check when implementing §6.4 step 4; fallback: render and discard |
-| Which develop-setting keys change without a visible change (e.g. bookkeeping fields), and the raw-metadata key for orientation | Log `getDevelopSettings()` before and after a metadata-only edit and a real edit; exclude noisy keys from the fingerprint |
+| ~~Whether `rendition:skipRender()` works for unchanged photos~~ | **Resolved (Task 15, 0.5.2):** inside the renditions loop it throws "AgExportRendition:skip(): must not be called after exportSession has started rendering". Kept photos render and the file is discarded (a 1-photo publish took 1.5 s); `recordPublishedPhotoId` with the old id then marks them published. Held photos render first too, since `uploadFailed` before the render isn't reported (Task 14) |
+| ~~Which develop-setting keys change without a visible change, and the raw-metadata key for orientation~~ | **Resolved (Task 15, 0.4.7, 178 develop keys):** a title or rating change changed no develop key, so `EXCLUDED_DEVELOP_KEYS` stays empty. `getRawMetadata('orientation')` works (`'DA'` → `'CD'` after Rotate Left; the develop settings also carry `orientation`). Exposure changes `Exposure2012`. A white-balance slider moved and moved back changes only the `WhiteBalance` label ("As Shot" → "Custom"), which counts as a change |
+| Gallera favorites `latest[]` completeness | **Resolved (Task 15):** not complete. A list with `items_count` 6 returned 4 in `latest` (and 5 `lightroom_list` names), so names are matched as a fallback (§6.4 step 4). After a favorited photo is re-uploaded, the list still counts the old photo by name, so the new photo with that name is treated as a favorite too |
 | "Filename" ↔ `allow_caption` | Toggle it on the website, then compare the gallery object |
 | "People recognition" availability on the user's plan | Check `face_grouping_available` |
 | Whether `photos/sort` with `type: manual` changes `order_by` to manual | Read the gallery after the first sort |

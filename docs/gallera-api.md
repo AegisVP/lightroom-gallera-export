@@ -155,5 +155,5 @@ Example (one finished list, one unfinished):
  "lightroom_list": ["vlad2"], "latest": [{"id": 140349246, ...}]}
 ```
 
-- Unverified: whether `latest` is always complete. In both captured lists `latest` had exactly `items_count` entries, but the largest list had only 3 photos. If `#latest < items_count`, don't trust `latest`. Fall back to matching `lightroom_list` against `original_filename` from `GET photos/{slug}` (this can be ambiguous when two photos have the same name), or capture a larger list.
+- `latest` is **not** always complete: a list with `items_count` 6 returned 4 photos in `latest` and 5 names in `lightroom_list` (2026-10-31, from Lightroom). If `#latest < items_count`, don't trust `latest` alone: also match `lightroom_list` against `original_filename` from `GET photos/{slug}` (ambiguous when two photos have the same name). After a favorited photo is deleted, the list appears to keep counting it.
 - Observed side effect: a photo deleted with `photos/delete` (140349250) came back after its gallery was trashed and restored (`updated_at` = restore time, `deleted_at: null`). Restoring a gallery appears to restore photos deleted from it too.
