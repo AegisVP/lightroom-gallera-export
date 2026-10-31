@@ -48,4 +48,14 @@ function GalleryLookup.ownsAny(linkedIds, activeList, trashedList)
 	return false
 end
 
+-- D10: what to do with a collection given its gallery's state and its `deleted` flag (nil or { state, ... }).
+-- 'mark' (also when a trashed gallery is now gone), 'unmark' (active again), or nil. Never toggles (§6.9).
+function GalleryLookup.reconcile(state, flagged)
+	if state == 'active' then
+		return flagged and 'unmark' or nil
+	end
+	if flagged and flagged.state == state then return nil end
+	return 'mark'
+end
+
 return GalleryLookup

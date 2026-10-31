@@ -15,6 +15,7 @@ local LrView = import 'LrView'
 
 local Auth = require 'Auth'
 local CollectionStore = require 'CollectionStore'
+local DeletedGallery = require 'DeletedGallery'
 local Fingerprint = require 'Fingerprint'
 local GalleryLookup = require 'GalleryLookup'
 local Log = require 'Log'
@@ -400,7 +401,33 @@ local function run(exportContext, key)
 	end
 	local found, err = GalleryLookup.find(api, galleryId)
 	if not found then return failAll(exportContext, errorText(err)) end
-	if found.state ~= 'active' then return failAll(exportContext, 'Gallery deleted') end
+	-- §6.9: Restore / Create new / Cancel. After Create new, every photo uploads to the new gallery.
+	local recreated = false
+	if found.state ~= 'active' then
+		local outcome, how = DeletedGallery.handle(collection, api, found)
+		if outcome ~= 'continue' then return failAll(exportContext, 'Gallery deleted on Gallera.' .. QUEUED) end
+		recreated = how == 'created'
+		galleryId = tonumber(collection:getRemoteId())
+		found, err = GalleryLookup.find(api, galleryId)
+		if not found then return failAll(exportContext, errorText(err)) end
+		if found.state ~= 'active' then return failAll(exportContext, 'Gallery deleted on Gallera.' .. QUEUED) end
+		if recreated then
+			-- Photos outside this publish were marked to re-publish by Create new.
+			local inRun = {}
+			for photo in exportContext.exportSession:photosToExport() do inRun[photo.localIdentifier] = true end
+			local remaining = 0
+			for _, published in ipairs(collection:getPublishedPhotos()) do
+				if not inRun[published:getPhoto().localIdentifier] then remaining = remaining + 1 end
+			end
+			if remaining > 0 then
+				LrDialogs.message('Gallera: new gallery created',
+					string.format('This publish uploads its %d photo(s). Publish again to upload the remaining %d photo(s).',
+						count, remaining), 'info')
+			end
+		end
+	elseif DeletedGallery.flag(collection) then
+		DeletedGallery.unmark(collection)   -- restored on the website
+	end
 	local slug = found.slug
 	local gallery = api:getGallery(slug)
 	local publicUrl = gallery and type(gallery.public_url) == 'string' and gallery.public_url or collection:getRemoteUrl()
@@ -518,7 +545,8 @@ local function run(exportContext, key)
 						rendition:recordPublishedPhotoId(tostring(photoId))
 						recorded[tonumber(photoId)] = photo
 						if publicUrl then rendition:recordPublishedPhotoUrl(publicUrl) end
-						if oldId then oldIds[#oldIds + 1] = oldId end
+						-- After Create new the old ids belong to the deleted gallery: nothing to replace.
+						if oldId and not recreated then oldIds[#oldIds + 1] = oldId end
 						fingerprints[photoKey] = decision.fingerprint or fingerprintOf(photo, render)
 						Log.info('publish: uploaded photo', photoId, oldId and ('replacing ' .. oldId) or '')
 					elseif uploadErr.kind == 'auth' then
@@ -544,6 +572,12 @@ local function run(exportContext, key)
 	end
 
 	-- D6: replaced photos are deleted only after their new version uploaded.
+	-- Only ids still in this gallery: one foreign id (e.g. from a gallery deleted and re-created, §6.9)
+	-- fails the whole photos/delete call with 422.
+	if #oldIds > 0 and not authStopped then
+		local galleryPhotos = api:listPhotos(slug)
+		if galleryPhotos then oldIds = PublishPlan.inGallery(oldIds, galleryPhotos) end
+	end
 	if #oldIds > 0 and not authStopped then
 		local deleted, deleteErr = api:deletePhotos(slug, oldIds)
 		if deleted then

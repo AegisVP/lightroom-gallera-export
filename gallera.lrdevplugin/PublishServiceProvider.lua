@@ -8,6 +8,7 @@ local LrTasks = import 'LrTasks'
 local Auth = require 'Auth'
 local CollectionSettingsDialog = require 'CollectionSettingsDialog'
 local CollectionStore = require 'CollectionStore'
+local DeletedGallery = require 'DeletedGallery'
 local GalleryLookup = require 'GalleryLookup'
 local Log = require 'Log'
 local Names = require 'Names'
@@ -165,10 +166,12 @@ function provider.deletePhotosFromPublishedCollection(publishSettings, ids, dele
 	local found, err = GalleryLookup.find(api, galleryId)
 	if not found then error('Gallera: ' .. errorText(err) .. RETRY) end
 	if found.state ~= 'active' then
-		-- No Gallera copy is left to delete. Marking the collection (§6.9) comes with DeletedGallery (Task 18).
+		-- No Gallera copy is left to delete. The collection is marked without a prompt (§6.5, §6.9).
 		Log.info('remove photos: gallery', galleryId, 'is', found.state, '; dropping the records')
-		return drop(photoIds)
+		drop(photoIds)
+		return DeletedGallery.mark(collection, found.state)
 	end
+	if DeletedGallery.flag(collection) then DeletedGallery.unmark(collection) end
 
 	local deleted
 	deleted, err = api:deletePhotos(found.slug, photoIds)

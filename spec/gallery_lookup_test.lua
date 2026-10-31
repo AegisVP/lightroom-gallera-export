@@ -80,3 +80,23 @@ end
 function TestGalleryLookup:testAnyAccountOwnsAServiceWithoutLinkedGalleries()
 	lu.assertTrue(GalleryLookup.ownsAny({}, {}, {}))
 end
+
+-- Deleted-gallery marker (D10): what the startup check does with a collection --------------
+
+function TestGalleryLookup:testReconcileMarksTrashedOrGone()
+	lu.assertEquals(GalleryLookup.reconcile('trashed', nil), 'mark')
+	lu.assertEquals(GalleryLookup.reconcile('gone', nil), 'mark')
+end
+
+function TestGalleryLookup:testReconcileUnmarksRestoredGallery()
+	lu.assertEquals(GalleryLookup.reconcile('active', { state = 'trashed', originalName = 'a' }), 'unmark')
+end
+
+function TestGalleryLookup:testReconcileLeavesUnchangedState()
+	lu.assertNil(GalleryLookup.reconcile('active', nil))
+	lu.assertNil(GalleryLookup.reconcile('trashed', { state = 'trashed', originalName = 'a' }))
+end
+
+function TestGalleryLookup:testReconcileUpdatesStateWhenTrashEmptied()
+	lu.assertEquals(GalleryLookup.reconcile('gone', { state = 'trashed', originalName = 'a' }), 'mark')
+end

@@ -100,9 +100,10 @@ local function loadGallery(cs, api, galleryId, collection)
 	if session == nil or session.galleryId ~= galleryId then return end
 	if not found then return setLoaded(cs, false, errorText(err)) end
 	if found.state ~= 'active' then
-		return setLoaded(cs, false, found.state == 'trashed'
+		-- The D11 prompt runs on Publish: a rename made while this dialog is open is overwritten by its Name.
+		return setLoaded(cs, false, (found.state == 'trashed'
 			and 'This gallery was deleted on Gallera. It is still in the Gallera trash.'
-			or 'This gallery was deleted on Gallera.')
+			or 'This gallery was deleted on Gallera.') .. ' Publish the collection to restore it or create a new one.')
 	end
 	local gallery
 	gallery, err = api:getGallery(found.slug)

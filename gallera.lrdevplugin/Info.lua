@@ -13,5 +13,5 @@ return {
 		file = 'PublishServiceProvider.lua',
 	},
 
-	VERSION = { major = 0, minor = 7, revision = 3 },
+	VERSION = { major = 0, minor = 8, revision = 1 },
 }

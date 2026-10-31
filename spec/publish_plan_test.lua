@@ -177,3 +177,18 @@ function TestPublishPlan:testApplyGuardForcesCheckedUnchangedAndHoldsUncheckedCh
 	lu.assertEquals(force, {})
 	lu.assertEquals(hold, {})
 end
+
+-- Replaced photos (D6): only ids still in the gallery are sent to photos/delete -------------
+-- (after Create new the old ids belong to the deleted gallery, and one foreign id fails the batch with 422)
+
+function TestPublishPlan:testInGalleryKeepsIdsPresent()
+	lu.assertEquals(PublishPlan.inGallery({ 5, 6, 7 }, { { id = 7 }, { id = 5 }, { id = 9 } }), { 5, 7 })
+end
+
+function TestPublishPlan:testInGalleryMatchesStringIds()
+	lu.assertEquals(PublishPlan.inGallery({ 5, 6 }, { { id = '6' } }), { 6 })
+end
+
+function TestPublishPlan:testInGalleryEmptyGallery()
+	lu.assertEquals(PublishPlan.inGallery({ 5 }, {}), {})
+end

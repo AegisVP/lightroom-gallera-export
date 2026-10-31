@@ -325,7 +325,7 @@ Whenever a lookup (`GalleryLookup.find` or `getGallery`) returns a `public_url` 
    3. On success: `rendition:recordPublishedPhotoId(photoId)` and `recordPublishedPhotoUrl(public_url)`, and store the photo's fingerprint in `fingerprints`.
    4. If the photo was already published (re-publish), remember its **old** remote id.
    5. **The rendered JPEG** (D24): move it from Lightroom's temp folder to `<folder>\<collection name>\`. It overwrites this photo's earlier JPEG (from `jpegFiles`). If the name belongs to a different photo, a `-2`, `-3`, … suffix is added (D27). The collection name is made safe for Windows: `<>:"/\|?*` are replaced with `_`. This happens whether the upload succeeded or failed. If the setting is **Always remove after upload** and the upload succeeded, delete it instead (`LrFileUtils.delete`).
-7. **Delete old versions:** `deletePhotos(slug, oldIds)` for re-published photos whose new upload succeeded (D6).
+7. **Delete old versions:** `deletePhotos(slug, oldIds)` for re-published photos whose new upload succeeded (D6), only ids still in the gallery (`listPhotos` + `PublishPlan.inGallery`): one id from another gallery (after Create new, §6.9) fails the whole call with 422. Skipped in the publish that ran Create new.
 8. **Order** (if Order on Gallera is **Capture date**; **Lightroom order** is sent by `imposeSortOrderOnPublishedCollection`, which Lightroom calls after the uploads, see §6.4a): `listPhotos(slug)` (photos with a non-null `deleted_at` are left out, here and in the storage estimate), build `captureTimes` from Lightroom's `dateTimeOriginal` for this collection's published photos, `PhotoOrder.compute`, `sortPhotos(slug, ids, nil)`.
 9. **Favorites check** (D17): `getFavorites(slug)`. If any list is new, or its `items_count` / `is_finished` differs from `favoritesSeen`, ask "Client favorites changed (list '<title>'…). Review now?" Yes → §6.8. Nothing is applied without the dialog.
 10. **Summary dialog** (only if there were failures or skipped labels): uploaded / failed / labels added, removed and skipped. If photos failed: "N photos failed to upload. They're still queued; click Publish to retry."
@@ -371,7 +371,7 @@ Entry points: the **Gallera client favorites…** menu item (for the selected pu
 - `DeletedGallery.mark(collection, state)` renames the collection to `<originalName> - (deleted)` (only if it isn't already marked) and stores `deleted = { state, originalName }`.
 - `unmark` restores `originalName` and clears the flag.
 
-**Prompt** (publish, opening settings, favorites sync):
+**Prompt** (publish, favorites sync). The collection settings dialog only shows the deleted status and says to Publish: a rename made while it is open is overwritten by its Name field. The prompt comes first; the collection is marked only when it stays deleted (Cancel, or Restore / Create new failed):
 
 > This gallery was deleted[, but it is still available in Gallera trash].
 > [Restore] (only when trashed) [Create new] [Cancel]
@@ -382,11 +382,15 @@ Entry points: the **Gallera client favorites…** menu item (for the selected pu
   - Mark **all** published photos in the collection as modified (`publishedPhoto:setEditedFlag(true)`).
   - Continue. If this happens during a publish, finish the current batch, then tell the user: "Publish again to upload the remaining N photos."
 - **Cancel:** the collection stays marked.
+- Create new during a publish: the "Publish again to upload the remaining N photos" message is shown before the renditions loop (a message after it never appeared).
 
 **Startup check** (`Init.lua`, background task, silent):
 - For each publish service of this plugin that has a token: run `listGalleries` + `listTrashedGalleries` once.
 - For each published collection with a `remoteId`: mark it if the gallery is trashed or gone. Unmark it if it's flagged but the gallery is active again (restored on the website).
 - Network or auth failures are logged and otherwise ignored.
+- A service whose account owns none of its linked galleries (D20 `ownsAny`) is skipped. That also skips a service whose every gallery was permanently deleted; Publish still detects it.
+- Lightroom also runs `LrInitPlugin` at the start of every publish, so the check can run while the D11 prompt is open. Before marking, it looks up the collection's current `remoteId` again (`GalleryLookup.find`), so a gallery restored or re-created meanwhile isn't marked.
+- The plugin's own `setName` does not call `renamePublishedCollection`.
 - Lightroom runs `LrInitPlugin` again on each plugin reload, sometimes several times in a row (S5). The check sets each collection's state from Gallera's answer (never toggles), so running it twice gives the same result, and a run that starts while another is in progress returns at once.
 
 ### 6.10 Login and logout

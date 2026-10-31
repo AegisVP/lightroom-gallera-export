@@ -175,4 +175,18 @@ function PublishPlan.confirmedDeletes(requestedIds, deletedIds, remainingIds)
 	return out
 end
 
+-- The ids (numbers) whose photo is in galleryPhotos (listPhotos objects), in the order given.
+function PublishPlan.inGallery(ids, galleryPhotos)
+	local present = {}
+	for _, p in ipairs(galleryPhotos or {}) do
+		local id = tonumber(p.id)
+		if id then present[id] = true end
+	end
+	local out = {}
+	for _, id in ipairs(ids) do
+		if present[tonumber(id)] then out[#out + 1] = id end
+	end
+	return out
+end
+
 return PublishPlan
