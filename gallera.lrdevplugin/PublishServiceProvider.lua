@@ -295,13 +295,9 @@ function provider.deletePublishedCollection(publishSettings, info)
 		return
 	end
 
-	local answer = LrDialogs.confirm('Delete the Gallera gallery too?',
-		'Deleting the gallery moves it to the deleted galleries on the Gallera website. It can be restored there.',
-		'Delete gallery', 'Keep gallery')
-	if answer ~= 'ok' then
-		Log.info('delete collection: gallery kept')
-		return
-	end
+	-- Lightroom only calls this after the user chose to delete from the service in its own dialog ('Leave on
+	-- service' doesn't call it), so the plugin doesn't ask again (user, 2026-10-31). Only an active gallery is
+	-- moved to the trash, once: trashGallery looks it up again and the call is never retried.
 	local ok
 	ok, err = api:trashGallery(galleryId)
 	if not ok then return report(errorText(err)) end

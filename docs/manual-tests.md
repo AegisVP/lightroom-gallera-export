@@ -68,8 +68,7 @@ drawn narrow with the name cropped until the panel is resized. The plugin doesn'
 | 5.1 | Remove a photo from the collection, Publish | It's gone from the website; no error |
 | 5.2 | Delete a photo on the website, then remove it in Lightroom, Publish | The record disappears without an error |
 | 5.3 | Delete a collection; in Lightroom's dialog choose **Leave on service** | The plugin isn't asked; the gallery stays on Gallera |
-| 5.4 | Delete a collection; choose Lightroom's delete-from-service option, then **Keep gallery** | The gallery stays |
-| 5.5 | Same, then **Delete gallery** | The gallery is in the website's deleted galleries (trash), not permanently deleted |
+| 5.4 | Delete a collection; choose Lightroom's delete-from-service option | No second question; the gallery is in the website's deleted galleries (trash), not permanently deleted |
 
 ## 6. Order on Gallera
 
