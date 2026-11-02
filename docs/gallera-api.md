@@ -7,7 +7,14 @@ Gallera has no public API. This document comes from HAR captures of the app.gall
 - Base URL: `https://api.gallera.io/api/`
 - Request headers: `Accept: application/json`, `X-Requested-With: XMLHttpRequest`, `Authorization: Bearer <token>`, and `Content-Type: application/json` for JSON bodies.
 - Every response is wrapped: `{"status": "success", "message": "...", "data": ..., "count"?: n}`. Check `status`, not only the HTTP code.
-- Errors use the same wrapper. The one captured: HTTP 404, `{"status": "notFound", "message": "No query results for model [App\\Models\\Gallery].", "data": {"message": ...}}`. The backend is Laravel. Other error statuses (401, 422 validation) haven't been captured yet.
+- Errors use the same wrapper. The backend is Laravel. Captured so far:
+  - HTTP 404, `{"status": "notFound", "message": "No query results for model [App\\Models\\Gallery].", "data": {"message": ...}}`.
+  - HTTP **403**, `{"status": "auth", "message": "Unauthenticated."}` for a revoked or invalid token (seen from the Lightroom spikes, 2026-10-30). Not 401.
+  - HTTP **422** (validation), same wrapper with a localized `message` (seen from the plugin, 2026-10-31):
+    - `auth/login` with a wrong password: "Пароль введено невірно".
+    - Saving a gallery with a slug another gallery of the account uses: "Адреса вашої галереї повинна бути унікальною серед ваших інших галерей."
+    - `photos/delete` with an id that isn't in that gallery (e.g. from a deleted gallery): "Вибране для photos.0 значення не коректне. (and 5 more errors)". **One foreign id fails the whole call**, so send only ids that are in the gallery.
+- `message` is **localized** to the account's language (e.g. login success came back as "Авторизація успішна"). Branch on `status` and the HTTP code, never on `message`.
 - Galleries have two identifiers:
   - `id` (numeric, never changes)
   - `slug` (used in most URLs). **The user can change the slug at any time** (observed: `new-gallery` → `new-gallery2`). Store `id` and look up the current `slug` before any slug-based call.
@@ -20,7 +27,7 @@ Gallera has no public API. This document comes from HAR captures of the app.gall
 ```
 → `data.token`, `data.user` (`id`, `username`, `storage.used`/`storage.limit` in bytes, `subscription_type`, `google_id`, `has_password`).
 
-- The token looks like a Laravel Sanctum token (`<id>|<secret>`). No expiry was observed. If any call returns 401, log in again.
+- The token looks like a Laravel Sanctum token (`<id>|<secret>`). No expiry was observed. If any call returns `status: "auth"` (HTTP 403, possibly 401), log in again.
 - `POST auth/logout` (no body) revokes the token.
 - `GET user` returns the same user object (useful for validating a stored token).
 - Accounts created through Google sign-in may have `has_password: false`, and email/password login won't work for them.
@@ -30,7 +37,7 @@ Gallera has no public API. This document comes from HAR captures of the app.gall
 ### List
 - `GET v2/galleries/my?page=1&sort=created&search=` → `data.galleries[]` (`id`, `name`, `slug`, `date`, `photos_count`, `is_public`, `has_password`, `allow_download`, `storage_to_date`, …), `data.pagination` (`current_page`, `last_page`, `has_more`, `total`). **Use this one to resolve id → slug.**
 - `GET galleries/list` → `data[]` with only `{id, name, small_cover_url}`. No slug, but cheap. Good for a picker.
-- `GET galleries/my/deleted` → galleries in the trash.
+- `GET galleries/my/deleted` → galleries in the trash. The plugin accepts both `data[]` and `data.galleries[]`; which one Gallera sends wasn't recorded (both work).
 
 ### Create
 `POST galleries/create`
@@ -71,6 +78,7 @@ Read-only fields of interest: `id`, `public_url` (e.g. `https://<username>.galle
   - On an active gallery → `"Gallery moved to deleted list."` A soft delete into the trash; the gallery keeps its `id` and `slug`.
   - On a gallery **already in the trash** → `"Gallery deleted."` A permanent delete. There's no separate endpoint, so calling delete twice in a row destroys the gallery.
 - `POST galleries/{slug}/restore` (no body) → success, and the gallery is back in `v2/galleries/my`.
+- The plugin never sends the DELETE when `galleries/my/deleted` holds a gallery with the same slug (it isn't known whether a trashed and an active gallery can share a slug; if they could, the call might hit the trashed one and delete it permanently).
 - Trashed galleries **don't appear** in `v2/galleries/my`, only in `galleries/my/deleted`. If a stored id isn't found in the main list, check the trash before treating the gallery as gone.
 - Other slug-based calls on a trashed gallery fail (e.g. `GET galleries/{slug}/stats` → 404 `notFound`).
 - There's no "empty trash" for all galleries at once. Trashed galleries that aren't permanently deleted are removed with their photos **7 days** after deletion (per the user, not seen in traffic).
@@ -93,12 +101,17 @@ Read-only fields of interest: `id`, `public_url` (e.g. `https://<username>.galle
 2. `PUT <data.url>` with the raw file bytes as the body and `Content-Type: <filetype>`. **Do not send the `Authorization` header** to R2. → 200 with an empty body.
 3. `POST photos/upload/{id}/uploaded` with `{"photo": <id>}` → success.
 
-Optional: poll `POST photos/processed` with `{"photo_ids": [ids]}`. It returns photos whose processing has finished (`is_compressing: false`, with `preview_url`, `image_url` filled in). It returns an empty `data` while they are still processing.
+Optional: poll `POST photos/processed` with `{"photo_ids": [ids]}`. It returns photos whose processing has finished (`is_compressing: false`, with `preview_url`, `image_url` filled in). It returns an empty `data` while they are still processing. An 11 MB JPEG took about 5 s.
+
+Verified from Lightroom (`LrHttp`, Windows) on 2026-10-30: the PUT works with the body as one string or as a chunked function body; 11.3 MB took 2.3 s. After processing, the photo's `filesize` equals the uploaded byte count. That's the check that the upload is complete.
 
 The web UI also calls `POST analytics/uploading`. That call isn't needed.
 
 ### List
 `GET photos/{slug}` → `data[]` photo objects: `id`, `original_filename`, `filesize`, `preview_mini_url`, `preview_url`, `image_url`, `is_compressing`, `is_hidden_by_client`, `order_number`, `gallery_id`, `deleted_at`.
+
+- `filesize` is the size of the uploaded original.
+- `image_url` is **not** the original: it's a re-encoded display copy, at most 1920 px on the long edge, about JPEG quality 90 (a 6048 px, 11 MB upload came back as 1920 px, 493 KB). No URL for the original has been seen.
 
 ### Delete
 `POST photos/delete`
@@ -106,6 +119,8 @@ The web UI also calls `POST analytics/uploading`. That call isn't needed.
 {"gallery": "<slug>", "photos": [140349250]}
 ```
 → `data` = the deleted ids. It appears to be a soft delete (the gallery's `deleted_count` goes up).
+- A photo already deleted on the website (same gallery) is still accepted: HTTP 200 and its id in `data` (2026-10-31).
+- An id from another gallery fails the whole call with 422 (see Basics).
 
 ### Sort (manual order)
 `POST photos/sort`
@@ -116,7 +131,7 @@ The web UI also calls `POST analytics/uploading`. That call isn't needed.
 → `data` echoes the request.
 
 - `sorted` is the **complete** list of photo ids in the new order. The UI sends every photo even when only two swapped places. Send all photos, including ones the plugin didn't upload.
-- `type: "manual"` matches the "Manual" sort option. Presumably this also switches the gallery's `order_by` to manual (unverified).
+- `type: "manual"` matches the "Manual" sort option. It switches the gallery to Manual: the website's sort option shows Manual after the plugin's sort (2026-10-31). In a manually ordered gallery a new upload is placed first.
 - `folder` is `null` for the whole gallery. It is presumably a scene (folder) id when sorting within a scene, which is relevant once scenes are supported.
 
 ### Replace
@@ -146,5 +161,5 @@ Example (one finished list, one unfinished):
  "lightroom_list": ["vlad2"], "latest": [{"id": 140349246, ...}]}
 ```
 
-- Unverified: whether `latest` is always complete. In both captured lists `latest` had exactly `items_count` entries, but the largest list had only 3 photos. If `#latest < items_count`, don't trust `latest`. Fall back to matching `lightroom_list` against `original_filename` from `GET photos/{slug}` (this can be ambiguous when two photos have the same name), or capture a larger list.
+- `latest` is **not** always complete: a list with `items_count` 6 returned 4 photos in `latest` and 5 names in `lightroom_list` (2026-10-31, from Lightroom). If `#latest < items_count`, don't trust `latest` alone: also match `lightroom_list` against `original_filename` from `GET photos/{slug}` (ambiguous when two photos have the same name). After a favorited photo is deleted, the list appears to keep counting it.
 - Observed side effect: a photo deleted with `photos/delete` (140349250) came back after its gallery was trashed and restored (`updated_at` = restore time, `deleted_at: null`). Restoring a gallery appears to restore photos deleted from it too.

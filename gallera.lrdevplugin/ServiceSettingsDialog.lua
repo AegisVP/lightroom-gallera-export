@@ -1,0 +1,241 @@
+--[[ Publish service settings: the Gallera account section and the Uploaded JPEGs section (DESIGN.md §7.1, D24).
+     Dialog-only state lives in ui_* properties; only exportPresetFields keys are saved by Lightroom. ]]
+local LrBinding = import 'LrBinding'
+local LrDialogs = import 'LrDialogs'
+local LrFunctionContext = import 'LrFunctionContext'
+local LrTasks = import 'LrTasks'
+local LrView = import 'LrView'
+
+local Auth = require 'Auth'
+local GalleraApi = require 'GalleraApi'
+local GalleryLookup = require 'GalleryLookup'
+local Log = require 'Log'
+
+local ServiceSettingsDialog = {}
+
+local GB = 1024 * 1024 * 1024
+
+local function gb(bytes)
+	return string.format('%.1f', (tonumber(bytes) or 0) / GB)
+end
+
+local function accountText(propertyTable, user)
+	local text = 'Logged in as ' .. (propertyTable.ui_username or '…')
+	local storage = user and user.storage
+	if type(storage) == 'table' then
+		local limit = tonumber(storage.limit)
+		text = text .. ' · ' .. gb(storage.used) .. ' / ' .. (limit and gb(limit) or 'unlimited') .. ' GB used'
+	end
+	return text
+end
+
+local function showLoggedOut(propertyTable, message)
+	propertyTable.ui_loggedIn = false
+	propertyTable.ui_loggedOut = true
+	propertyTable.ui_account = 'Not logged in'
+	propertyTable.ui_message = message or ''
+end
+
+local function showLoggedIn(propertyTable, user)
+	propertyTable.ui_loggedIn = true
+	propertyTable.ui_loggedOut = false
+	propertyTable.ui_account = accountText(propertyTable, user)
+	propertyTable.ui_message = ''
+end
+
+-- Refreshes the account line (storage use) and notices a revoked token.
+local function refreshAccount(propertyTable)
+	LrTasks.startAsyncTask(function()
+		local api = Auth.api(propertyTable)
+		if not api then return end
+		local user, err = api:getUser()
+		if user then
+			if type(user.username) == 'string' then propertyTable.ui_username = user.username end
+			showLoggedIn(propertyTable, user)
+		elseif err.kind == 'auth' then
+			Auth.clear(propertyTable.email)
+			showLoggedOut(propertyTable, 'Your Gallera login expired. Log in again.')
+		else
+			propertyTable.ui_message = GalleraApi.userText(err)
+		end
+	end)
+end
+
+function ServiceSettingsDialog.startDialog(propertyTable)
+	-- Lightroom doesn't keep includeVideoFiles in the saved settings, so it opens as true and Lightroom resets it
+	-- to false (canExportVideo = false) a moment after the dialog opens. That write enabled Save and made every
+	-- Save ask to re-publish all photos. Setting it first leaves nothing to change (0.5.17).
+	propertyTable.LR_includeVideoFiles = false
+	if Auth.token(propertyTable.email) then
+		showLoggedIn(propertyTable, nil)
+		refreshAccount(propertyTable)
+	else
+		showLoggedOut(propertyTable)
+	end
+end
+
+-- D20, one Gallera account per publish service: after a login, the account must own one of the galleries this
+-- service's collections are linked to. Otherwise the collections belong to another account; offer to log out.
+local function checkAccount(propertyTable, email)
+	local service = propertyTable.LR_publishService
+	local ok, collections = LrTasks.pcall(function() return service and service:getChildCollections() or {} end)
+	if not ok then
+		Log.warn('account check skipped: no publish service:', tostring(collections))
+		return
+	end
+	local ids, names = {}, {}
+	for _, c in ipairs(collections) do
+		local id = tonumber(c:getRemoteId())
+		if id then
+			ids[#ids + 1] = id
+			if #names < 3 then names[#names + 1] = "'" .. c:getName() .. "'" end
+		end
+	end
+	if #ids > #names then names[#names + 1] = '…' end
+	if #ids == 0 then return end
+
+	local api = Auth.api(propertyTable)
+	local active, err = api and api:listGalleries()
+	local trashed
+	if active then trashed, err = api:listTrashedGalleries() end
+	if not (active and trashed) then
+		Log.warn('account check skipped:', err and err.kind, err and err.message)
+		return
+	end
+	local owns = GalleryLookup.ownsAny(ids, active, trashed)
+	Log.info('account check:', #ids, 'linked collection(s), account owns one:', tostring(owns))
+	if owns then return end
+	local answer = LrDialogs.confirm(
+		'This Gallera account has none of the galleries this publish service is linked to.',
+		'The collections ' .. table.concat(names, ', ') .. ' belong to another Gallera account. ' ..
+			'Use a separate Gallera publish service for this account.',
+		'Log out', 'Keep this account')
+	if answer == 'ok' then
+		Auth.logout(email)
+		propertyTable.ui_username = ''
+		showLoggedOut(propertyTable, "Logged out: this account does not own this service's galleries.")
+	end
+end
+
+local function logIn(propertyTable)
+	LrFunctionContext.postAsyncTaskWithContext('Gallera login', function(context)
+		LrDialogs.attachErrorDialogToFunctionContext(context)
+		local email = propertyTable.email
+		if type(email) ~= 'string' or not email:find('%S') then
+			LrDialogs.message('Gallera', 'Enter your Gallera email first.', 'info')
+			return
+		end
+
+		local f = LrView.osFactory()
+		local props = LrBinding.makePropertyTable(context)
+		props.password = ''
+		local contents = f:column {
+			bind_to_object = props,
+			spacing = f:control_spacing(),
+			f:row {
+				f:static_text { title = 'Email:', width = LrView.share 'label' },
+				f:static_text { title = email },
+			},
+			f:row {
+				f:static_text { title = 'Password:', width = LrView.share 'label' },
+				f:password_field { value = LrView.bind 'password', width_in_chars = 30 },
+			},
+			f:static_text { title = 'Only the login token is stored. The password is not saved.' },
+		}
+		local result = LrDialogs.presentModalDialog { title = 'Log in to Gallera', contents = contents, actionVerb = 'Log in' }
+		local password = props.password
+		props.password = ''
+		if result ~= 'ok' then return end
+
+		propertyTable.ui_message = 'Logging in…'
+		local user, err = Auth.login(email, password)
+		password = nil
+		if not user then
+			-- Gallera's own message is in the account's language; it's in the log, the user gets English text.
+			local message
+			if err and err.kind == 'network' then
+				message = "Gallera can't be reached. Check the internet connection and try again."
+			elseif err and (err.kind == 'auth' or err.status == 422) then
+				message = 'The email or password is wrong.'
+			else
+				message = string.format("Gallera couldn't log you in (HTTP %s). Try again later.", tostring(err and err.status or '?'))
+			end
+			propertyTable.ui_message = ''   -- the dialog below says why; the section shows 'Not logged in'
+			LrDialogs.message('Gallera login failed', message, 'critical')
+			return
+		end
+		if user.has_password == false then
+			LrDialogs.message('Gallera', 'This Gallera account has no password. Set one on the website first.', 'info')
+		end
+		propertyTable.ui_username = type(user.username) == 'string' and user.username or ''
+		showLoggedIn(propertyTable, user)
+		checkAccount(propertyTable, email)
+	end)
+end
+
+local function logOut(propertyTable)
+	LrTasks.startAsyncTask(function()
+		propertyTable.ui_message = 'Logging out…'
+		Auth.logout(propertyTable.email)
+		propertyTable.ui_username = ''
+		showLoggedOut(propertyTable)
+	end)
+end
+
+local function chooseFolder(propertyTable)
+	local picked = LrDialogs.runOpenPanel {
+		title = 'Folder for uploaded JPEGs',
+		canChooseFiles = false,
+		canChooseDirectories = true,
+		canCreateDirectories = true,
+		allowsMultipleSelection = false,
+		initialDirectory = propertyTable.jpegFolder,
+	}
+	if picked and picked[1] then propertyTable.jpegFolder = picked[1] end
+end
+
+function ServiceSettingsDialog.sectionsForTopOfDialog(f, propertyTable)
+	local bind = LrView.bind
+	return {
+		{
+			title = 'Gallera account',
+			synopsis = bind { key = 'ui_account', object = propertyTable },
+			bind_to_object = propertyTable,
+
+			-- Everything stays visible and only 'enabled' follows the login state: 'visible' bindings never
+			-- hid a row in this section (0.2.1, 0.2.2), while 'enabled' bindings work (spike S4).
+			f:row {
+				f:static_text { title = 'Email:' },
+				f:edit_field { value = bind 'email', width_in_chars = 30, immediate = true, enabled = bind 'ui_loggedOut' },
+				f:push_button { title = 'Log in…', enabled = bind 'ui_loggedOut', action = function() logIn(propertyTable) end },
+				f:push_button { title = 'Log out', enabled = bind 'ui_loggedIn', action = function() logOut(propertyTable) end },
+			},
+			f:static_text { title = bind 'ui_account', fill_horizontal = 1, width_in_chars = 60 },
+			f:static_text { title = bind 'ui_message', fill_horizontal = 1, width_in_chars = 60 },
+		},
+		{
+			title = 'Uploaded JPEGs',
+			bind_to_object = propertyTable,
+
+			f:row {
+				f:static_text { title = 'After upload:', width = LrView.share 'jpegLabel' },
+				f:popup_menu {
+					value = bind 'jpegHandling',
+					items = {
+						{ title = 'Keep, ask to remove after publish', value = 'ask' },
+						{ title = 'Always keep', value = 'keep' },
+						{ title = 'Always remove after upload', value = 'remove' },
+					},
+				},
+			},
+			f:row {
+				f:static_text { title = 'Folder:', width = LrView.share 'jpegLabel' },
+				f:edit_field { value = bind 'jpegFolder', width_in_chars = 40 },
+				f:push_button { title = 'Choose…', action = function() chooseFolder(propertyTable) end },
+			},
+			f:static_text { title = 'Each collection gets its own subfolder.' },
+		},
+	}
+end
+
+return ServiceSettingsDialog
