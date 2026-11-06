@@ -107,6 +107,13 @@ drawn narrow with the name cropped until the panel is resized. The plugin doesn'
 | 8.6 | Change colors, **Cancel** | Nothing changes; reopening shows the last applied colors |
 | 8.7 | Edit Collection > **Client favorites…** | The same dialog opens |
 | 8.8 | Restart Lightroom | The labeled photos are still under Published |
+| 8.9 | Set one list to ★★★ and another to Pick flag; Apply | The photos get 3 stars / Pick; a photo in a Red list and the ★★★ list gets both |
+| 8.10 | Give a photo your own 5 stars; its list is ★★★ without Override; Apply | It keeps 5 stars ("Kept their own rating") |
+| 8.11 | Same with **Override**; Apply. Then un-favorite it on the website; Apply | It gets 3 stars; after leaving the list it keeps 3 stars |
+| 8.12 | Reject a photo (X); its list is Pick flag, first without, then with Override | Without: stays Rejected. With: becomes Pick |
+| 8.13 | One photo in a Red list with Override and a Blue list without; Apply | It's red, no conflict |
+| 8.14 | Both lists with Override | Named as a conflict and unchanged |
+| 8.15 | Reopen the dialog | Marks and Override boxes are pre-filled; lists saved by an older version show their color |
 
 ## 9. Safety
 

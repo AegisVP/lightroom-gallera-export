@@ -75,9 +75,9 @@ All are documented in `docs/gallera-api.md` unless noted.
 | D10 | A deleted gallery is detected during any Gallera operation and once at Lightroom startup. The collection is renamed `<original name> - (deleted)` and flagged. The plugin never acts on its own | No "disabled" state exists in Lightroom; renaming is the only visible marker |
 | D11 | Deleted-gallery dialog: "This gallery was deleted[, but it is still available in Gallera trash]." Buttons: **[Restore]** (only if trashed) **[Create new]** **[Cancel]** | User choice |
 | D12 | Photo order, a per-collection setting **Order on Gallera**: **Capture date** (default: after each publish, sort Lightroom-published photos by capture time and send the full order), **Lightroom order** (the collection's User Order, sent on every Publish through `imposeSortOrderOnPublishedCollection`; photos added on the website go last), **Don't change**. The plugin can't set Lightroom's order, so it only pushes Lightroom's order to the website | Gallera has no capture-date sort. User choice (2026-10-31, replacing the checkbox): the Lightroom and website orders should match, and reordering in Lightroom must reach the website |
-| D13 | Favorites are **never applied automatically**. A **Client favorites** dialog lists every favorites list (title, Finished / In progress, photo count). The user picks a color for each list: Skip / Red / Yellow / Green / Blue / Purple. The last choice for each list is remembered and pre-filled next time; new lists default to Skip | User choice: the photographer decides what each selection means |
-| D14 | Label mirroring, for each list given a color: add that color to the photos in the list. Remove it when a photo leaves the list, **only if** the plugin applied it from that list and the photo's label is still that color. Never overwrite a label the plugin didn't apply (report it as skipped). Which list and color the plugin applied is tracked in a hidden plugin metadata field. "Still that color" is checked with `colorNameForLabel` under the active label set (S6: Lightroom stores the label *text*, so after a label-set switch the color no longer matches and the photo is left alone) | The plugin only touches labels it can prove it set |
-| D15 | A list set to Skip is left entirely alone: its photos get no labels, and labels applied from it earlier are kept. Finished and unfinished lists are treated the same; the dialog only shows their status. A photo in two lists with **different** colors is left unchanged and reported as a conflict | Skipping never strips labels; the plugin never guesses |
+| D13 | Favorites are **never applied automatically**. A **Client favorites** dialog lists every favorites list (title, Finished / In progress, photo count). The user picks a **mark** for each list: Skip, a color label, a star rating or the Pick flag, plus **Override** (D32). The last choice for each list is remembered and pre-filled next time; new lists default to Skip | User choice: the photographer decides what each selection means. Stars, flag and Override added 2026-11-06 |
+| D14 | Mark mirroring (labels here; ratings and the flag follow the same rules, D32), for each list given a color: add that color to the photos in the list. Remove it when a photo leaves the list, **only if** the plugin applied it from that list, the photo's label is still that color, and it didn't replace a different label (Override, D32). Without Override, never overwrite a label the plugin didn't apply (report it as skipped). Which list and color the plugin applied is tracked in a hidden plugin metadata field. "Still that color" is checked with `colorNameForLabel` under the active label set (S6: Lightroom stores the label *text*, so after a label-set switch the color no longer matches and the photo is left alone) | The plugin only touches labels it can prove it set |
+| D15 | A list set to Skip is left entirely alone: its photos get no labels, and labels applied from it earlier are kept. Finished and unfinished lists are treated the same; the dialog only shows their status. A photo in two lists with **different** colors is left unchanged and reported as a conflict, unless only one of them has Override (D32) | Skipping never strips labels; the plugin never guesses |
 | D16 | Favorites are matched by **recorded Gallera photo id**. Filenames are never changed; `lightroom_list` filename matching is a fallback only | Ids are exact; filenames are kept for human readability and the fallback |
 | D17 | The Client favorites dialog opens from **Library > Plug-in Extras > Gallera client favorites…**. After a publish, if any list is new or has changed since the last review (by `items_count` / `is_finished`), the plugin asks "Client favorites changed (list 'vv'). Review now?" Yes opens the dialog | The dialog is offered when it's relevant, but nothing is applied without it |
 | D22 | **Originals are never modified or deleted.** The only things the plugin changes in the catalog: color labels (D14), its own hidden metadata field, Lightroom's publish records, and the published collection's name, remote id and settings. What happens to rendered JPEGs is a service setting (D24) | User requirement |
@@ -92,6 +92,7 @@ All are documented in `docs/gallera-api.md` unless noted.
 | D27 | Kept JPEGs (D24) are tracked per collection as `jpegFiles = { [photo localIdentifier] = file name }` together with `jpegFolderPath`, the folder those names were written to. In any other folder (JPEG folder setting changed, collection renamed) the names aren't the plugin's: it starts with an empty map there, so a same-named file is never overwritten or deleted (`PublishPlan.jpegFilesFor`, final review 2026-10-31). A re-render of the same photo overwrites its own file. If the name is taken by a different photo, a suffix is added: `name-2.jpg`, `name-3.jpg`, … The uploaded `filename` stays the rendered name without the suffix | User choice; collisions are unlikely but must never overwrite another photo's JPEG |
 | D28 | JSON: bundled **dkjson** (pure Lua, MIT), not rxi/json.lua. It keeps JSON `null` (`json.null`) and tells empty objects from empty arrays, so a gallery object read with GET and saved back keeps every field as it was | rxi drops `null` keys and writes `{}` as `[]`, which would change `design`/`cover` on save (D4) |
 | D30 | **A queued photo re-uploads, with one guard for client favorites.** Lightroom queues a published photo only on a develop change or a manual *Mark to Re-publish*; title, rating and label edits don't queue it (seen on 0.5.0). Every queued photo re-uploads and replaces its earlier version (D6). The guard: queued photos whose Gallera photo is in a client favorites list are listed in one dialog (thumbnail, file name, the lists it's in, **Picture changed** when it changed, a checkbox each, none checked; **Select all** / **Select none** / **Select changed**). **[Re-upload checked]** re-uploads the checked ones. Unchecked unchanged photos keep their Gallera photo and are recorded as published again with the same remote id; unchecked changed photos fail with "Not re-uploaded: in client favorites" and stay queued (Gallera still has the old picture). **[Cancel]** stops the whole publish without any change (nothing rendered, uploaded or recorded). "Changed" comes from a fingerprint stored at each upload of what shapes the pixels: develop settings (crop included), orientation, and the effective render settings (service settings + collection override), so a changed collection size/quality counts as a picture change | User choice (2026-10-31, replacing the earlier "metadata never counts" rule and D31's separate warning). A re-upload gets a new photo id and loses the client's favorites on it |
+| D32 | **Marks** (2026-11-06). A list's mark is one of three **kinds**: a color label (Red / Yellow / Green / Blue / Purple), a star rating (1 to 5), or the Pick flag. Each kind is planned on its own, so a photo in a Red list and a 3-star list gets both. **Override** (a checkbox per list) lets the list replace a value the plugin didn't apply (another label, rating, or a Reject flag) instead of skipping the photo. Conflicts are per kind: among the lists that set the same kind for a photo, lists with Override win over lists without; two different values that are both from Override lists (or both from non-Override lists) are a conflict and the photo is left unchanged, as before. A value Override wrote over a **different** value stays when the photo leaves the list (the plugin stops tracking it); a value written over nothing is removed as in D14 | User choice: one grouped popup (Color / Stars / Flag), Override for every kind, overridden values are left alone |
 | D31 | *Merged into D30 (2026-10-31).* The separate warning before re-uploading photos in client favorites is gone; the D30 dialog lists every queued photo in client favorites, changed or not | User choice: one dialog |
 | D29 | Unit tests use **luaunit** (vendored `spec/luaunit.lua`) on a portable Lua 5.1 in the gitignored `tools/lua51/`. Run: `tools\lua51\lua5.1.exe spec\run.lua` | busted needs C modules and a compiler. The user doesn't want the machine's setup changed |
 
@@ -195,26 +196,34 @@ It searches the active list first, then the trash. `gone` means the gallery is i
 ```lua
 FavoritesSync.summarize(lists, photos) --> { { id, title, finished, count, matched }, ... }  -- rows for the dialog
 
+-- kind = "label" | "rating" | "flag"; value = color | 1..5 | "pick"
 FavoritesSync.plan{
   lists   = <getFavorites result>,
-  choices = { [listId] = "red"|"yellow"|"green"|"blue"|"purple" },   -- lists absent = Skip
-  photos  = { [remotePhotoId] = { key = <local photo key>, label = <current color|nil>,
-                                  applied = <{ listId, color }|nil> } },
+  choices = { [listId] = { kind, value, override = <bool> } },        -- lists absent = Skip
+  photos  = { [remotePhotoId] = {
+      key = <local photo key>,
+      current = { label = <color|nil>, rating = <1..5|nil>, flag = <"pick"|"reject"|nil> },  -- 0 stars / unflagged = nil
+      applied = { label = A|nil, rating = A|nil, flag = A|nil },      -- A = { listId, value, replaced = <bool> }
+  } },
 } --> {
-  set      = { { key, color, listId } },  -- add, or change a label the plugin applied earlier
-  remove   = { keys },
-  skippedOtherLabel = { keys },           -- has a label the plugin didn't apply
-  conflicts = { keys },                   -- in two chosen lists with different colors
-  incompleteLists = { ids },              -- #latest < items_count; caller falls back / warns
+  set       = { { key, kind, value, listId, replaced } },  -- add, change the plugin's own value, or override
+  remove    = { { key, kind } },                           -- clear the value and its applied record
+  forget    = { { key, kind } },                           -- clear only the applied record (Override's value stays)
+  skipped   = { { key, kind } },                           -- has its own value; no Override
+  conflicts = { { key, kind } },                           -- different values from lists of equal rank
+  incompleteLists = { ids },                               -- #latest < items_count; caller falls back / warns
 }
 ```
-- **Target:** a photo's target is the color of each chosen list whose `latest` contains its remote id. Two different target colors → `conflicts`, and the photo is left unchanged.
-- **Set:** the photo has a target color `c`.
-  - Current label `nil` → set `c`.
-  - Current label equals `applied.color` (the plugin's own label) and differs from `c` → change it to `c`.
-  - Current label `c` → only record `applied` (no visible change).
-  - Any other label → `skippedOtherLabel`.
-- **Remove:** the photo has no target, `applied.listId` is a **chosen** list this run, and its current label still equals `applied.color` → remove the label and clear `applied`.
+Each kind is planned on its own (D32). For one photo and one kind:
+- **Target:** the chosen lists that set this kind and whose `latest` contains the photo. If any of them has Override, only those count. Two different values among the counting lists → `conflicts`, and the photo's value of this kind is left unchanged. Equal values from several lists are one target (the first list's id is recorded).
+- **Set:** the photo has a target value `v` from list `L`.
+  - Current `nil` → set `v`, `replaced = false`.
+  - Current `v` → record `applied` only (no visible change). If the plugin already applied `v`, its `replaced` is kept; otherwise `false`.
+  - Current equals `applied.value` (the plugin's own) and differs from `v` → change it to `v`; `replaced` is kept from `applied`.
+  - Any other value: `L` has Override → set `v`, `replaced = true`; otherwise → `skipped`.
+- **Remove:** the photo has no target of this kind, `applied.listId` is a **chosen** list this run (with any mark), and the current value still equals `applied.value`:
+  - `replaced = false` → `remove` (clear the label / rating / flag, and `applied`).
+  - `replaced = true` → `forget`: the value stays and becomes the user's (D32).
 - **Untouched:** photos whose `applied.listId` is skipped this run, or whose list no longer exists (D15).
 
 **`PhotoOrder`**
@@ -250,12 +259,12 @@ Fingerprint.of{ develop = <getDevelopSettings() table>, orientation = <string|ni
 | `Info.lua` | Registers the publish service provider, `LrInitPlugin = Init.lua`, `LrMetadataProvider = GalleraMetadata.lua`, and the Library menu item `LrLibraryMenuItems` → "Gallera client favorites…". Personal toolkit id, e.g. `com.pysarenko.gallera`. `LrSdkVersion` matches the installed Lightroom Classic. |
 | `LrHttpAdapter` | Implements the adapter with `LrHttp.get`, `LrHttp.post(url, body, headers, method)` (incl. `PUT`) and `LrHttp.postMultipart`. Reads the status from the response headers. |
 | `Auth` | `login(email, password)` → stores the token with `LrPasswords.store("gallera.token:" .. email, token)`. `logout()`, `token(email)`. The password is never stored or logged. |
-| `GalleraMetadata` | A hidden custom field on each photo, `galleraLabelApplied` = `"<listId>:<color>"` (which list and color the plugin applied), used by D14. |
+| `GalleraMetadata` | Hidden custom fields on each photo, one per mark kind: `galleraLabelApplied` = `"<listId>:<color>[:r]"`, `galleraRatingApplied` = `"<listId>:<stars>[:r]"`, `galleraFlagApplied` = `"<listId>:pick[:r]"` (which list and value the plugin applied; `:r` = it replaced a different value with Override), used by D14 and D32. Adding the fields bumps `schemaVersion`. |
 | `PublishServiceProvider` | The publish callbacks (§6). |
 | `ServiceSettingsDialog` | `sectionsForTopOfDialog`: the account section (§7.1). |
 | `CollectionSettingsDialog` | `viewForCollectionSettings` / `updateCollectionSettings` (§7.2). |
 | `DeletedGallery` | `mark(collection, state)`, `unmark(collection)`, `prompt(state)` → `"restore"`, `"createNew"` or `"cancel"`. |
-| `FavoritesDialog` | The Client favorites dialog (§7.3): one row per list with a color popup; Apply / Cancel. |
+| `FavoritesDialog` | The Client favorites dialog (§7.3): one row per list with a mark popup and an Override checkbox; Apply / Cancel. |
 | `FavoritesCommand` | Opens `FavoritesDialog` for the selected published collection. |
 | `Log` | `LrLogger("Gallera")` with the `logfile` output. Redaction rules in §8. |
 
@@ -268,9 +277,9 @@ Fingerprint.of{ develop = <getDevelopSettings() table>, orientation = <string|ni
 | Publish service settings | `email` (not secret), `username` (for display), `jpegHandling` (`"ask"` (default), `"keep"` or `"remove"`), `jpegFolder`, plus the standard export settings |
 | `LrPasswords` | Token per email (`gallera.token:<email>`) |
 | Published collection `remoteId` / `remoteUrl` | Gallera gallery **id** / gallery `public_url` |
-| Collection settings (plugin-owned) | `favoritesColors` = `{ [listId] = color }` (last choices, to pre-fill the dialog), `favoritesSeen` = `{ [listId] = { count, finished } }` (to detect changed lists, D17), `jpegHandling` (`'service'` (default), `'ask'`, `'keep'` or `'remove'`, D24), `galleryOrder` (`'capture'` (default), `'lightroom'` or `'none'`; the old `orderByCapture` checkbox is read by `PhotoOrder.mode`), `overrideRender` (default `false`), `longEdge`, `jpegQuality`, `folderId` (always `nil` in the PoC), `deleted` = `nil` or `{ state, originalName }` (state is `"trashed"` or `"gone"`), `jpegFiles` = `{ [photo localIdentifier] = file name }` (D27), `fingerprints` = `{ [photo localIdentifier] = fingerprint of the uploaded version }` (D30) |
+| Collection settings (plugin-owned) | `favoritesMarks` = `{ [listId] = { mark, override } }` (last choices, to pre-fill the dialog; `mark` is a popup value, §7.3; the older `favoritesColors` = `{ [listId] = color }` is read for lists missing from it), `favoritesSeen` = `{ [listId] = { count, finished } }` (to detect changed lists, D17), `jpegHandling` (`'service'` (default), `'ask'`, `'keep'` or `'remove'`, D24), `galleryOrder` (`'capture'` (default), `'lightroom'` or `'none'`; the old `orderByCapture` checkbox is read by `PhotoOrder.mode`), `overrideRender` (default `false`), `longEdge`, `jpegQuality`, `folderId` (always `nil` in the PoC), `deleted` = `nil` or `{ state, originalName }` (state is `"trashed"` or `"gone"`), `jpegFiles` = `{ [photo localIdentifier] = file name }` (D27), `fingerprints` = `{ [photo localIdentifier] = fingerprint of the uploaded version }` (D30) |
 | Published photo | `publishedPhotoId` = Gallera photo id. `publishedPhotoUrl` = gallery `public_url` (Gallera has no known per-photo page) |
-| Photo custom metadata | `galleraLabelApplied` (`"<listId>:<color>"`) |
+| Photo custom metadata | `galleraLabelApplied`, `galleraRatingApplied`, `galleraFlagApplied` (`"<listId>:<value>[:r]"`, D32) |
 | Originals | **Never modified or deleted** (D22). Only the color label changes |
 
 Gallera's own settings may also end up in collection settings, because the dialog binds them. **They are never read from there.** They're always loaded fresh (D3).
@@ -350,18 +359,19 @@ This runs after the user removes photos from the published collection and clicks
 - **Gallery already trashed or gone:** no prompt, no API call.
 
 ### 6.8 Client favorites (always through the dialog, D13)
-1. `getFavorites(slug)`. Build the `photos` map: for each published photo in the collection, `remotePhotoId → { key, current label color, galleraLabelApplied }`.
+1. `getFavorites(slug)`. Build the `photos` map: for each published photo in the collection, `remotePhotoId → { key, current label color, rating and flag, the three applied fields }` (`batchGetRawMetadata` for `colorNameForLabel`, `rating`, `pickStatus`).
 2. If `incompleteLists` would be non-empty (`#latest < items_count`): for those lists, fall back to matching `lightroom_list` against `original_filename` from `listPhotos`, and log a warning. Ambiguous names are reported and not labeled.
-3. Show the **Client favorites dialog** (§7.3), pre-filled from `favoritesColors`. Cancel → nothing changes.
+3. Show the **Client favorites dialog** (§7.3), pre-filled from `favoritesMarks`. Cancel → nothing changes.
 4. On Apply:
    - `plan{ choices }`.
    - Before writing, note which of the affected photos' published-photo records are **not** edited (`publishedPhoto:getEditedFlag()`).
    - Apply inside `catalog:withWriteAccessDo`:
-     - **set:** `photo:setRawMetadata('colorNameForLabel', color)` (S6: works under any label set; Lightroom stores that set's text for the color) and `galleraLabelApplied = "<listId>:<color>"`.
-     - **remove:** clear the label and `galleraLabelApplied`.
+     - **set:** label `photo:setRawMetadata('colorNameForLabel', color)` (S6: works under any label set; Lightroom stores that set's text for the color), rating `setRawMetadata('rating', n)`, flag `setRawMetadata('pickStatus', 1)`; and the kind's applied field = `"<listId>:<value>[:r]"`.
+     - **remove:** clear the value (label as today; rating `0`, flag `pickStatus` `0`; to verify in Lightroom) and the applied field.
+     - **forget:** clear only the applied field.
    - **Undo the re-publish flag (S7):** Lightroom marks every photo whose label changed as modified, and `metadataThatTriggersRepublish` can't prevent it. Poll for up to ~10 s until the noted photos are flagged, then `setEditedFlag(false)` on those that were not edited before (inside `withWriteAccessDo`). Photos the user really edited stay queued. On 0.9.1 no photo was flagged within 10 s of a label change (as on 0.5.0: label edits don't queue with `metadataThatTriggersRepublish = { default = false }`), so the wait is 2 s and the unflag stays as a safety net. After a Lightroom restart the labeled photos were still under Published.
-   - Save `favoritesColors` and `favoritesSeen`.
-5. Report the counts: labeled / changed / removed / kept their existing label / conflicts.
+   - Save `favoritesMarks` and `favoritesSeen`.
+5. Report the counts per kind (labels / ratings / flags): added / changed / removed, kept their own value, conflicts, and how many Override replaced.
 
 - Incomplete lists (`#latest < items_count`) are completed by `FavoritesSync.completeLists`: a `lightroom_list` name (compared lowercased, already without extension) matching exactly one photo's `original_filename` without extension adds it; a name matching several photos is reported in the summary and labels nothing.
 - Conflicts count only between lists **chosen** this run: with one of two lists set to Skip, a photo in both gets the other list's color.
@@ -453,12 +463,15 @@ Entry points: the **Gallera client favorites…** menu item (for the selected pu
 ### 7.3 Client favorites dialog
 One row per favorites list in the gallery:
 
-| List | Status | Photos | In this collection | Color |
-|---|---|---|---|---|
-| vv | Finished | 3 | 3 | popup: Skip / Red / Yellow / Green / Blue / Purple |
-| (untitled) | In progress | 1 | 1 | popup |
+| List | Status | Photos | In this collection | Mark | Override |
+|---|---|---|---|---|---|
+| vv | Finished | 3 | 3 | popup: Red | ☑ |
+| anna | In progress | 1 | 1 | popup: ★★★ | ☐ |
+| (untitled) | In progress | 1 | 1 | popup: Pick flag | ☐ |
 
-- The Color popup is pre-filled from the last choice for that list. New lists start at Skip.
+- The **Mark** popup is grouped: Skip; Red / Yellow / Green / Blue / Purple; ★ to ★★★★★; Pick flag, with a separator between groups (popup values `skip`, the color names, `rating1`…`rating5`, `pick`). If `popup_menu` has no separators, the titles carry the group instead ("Label: Red", "Stars: ★★★", "Flag: Pick"); to verify in Lightroom.
+- **Override** is enabled when the mark isn't Skip (D32).
+- Both are pre-filled from the last choice for that list. New lists start at Skip, Override off.
 - An empty `title` or a URL-looking title (Gallera's default) is shown as "(untitled)".
 - Buttons: **Apply** / **Cancel**. After Apply, a summary is shown (§6.8 step 5).
 
@@ -502,7 +515,7 @@ Each spike answers a yes/no question. A "no" changes the design. Record the resu
   - `GalleraApi`: request shapes (method, path, body, headers; the PUT carries no `Authorization`), envelope unwrapping, error kinds, `trashGallery` refusing a non-active gallery, pagination.
   - `GallerySettings`: `toProps`/`diff`/`apply` round-trip; `design`, `cover`, unknown fields, `null` values and empty objects are preserved through decode → apply → encode (D28).
   - `GalleryLookup`: active, trashed, gone, and a changed slug.
-  - `FavoritesSync`: every rule in §5.2, incl. skipped lists left alone, the plugin's own label changed to a new color, a label the user set themselves (skipped), conflicting colors from two lists, removal only for lists chosen this run, a list that disappeared, and incomplete `latest`.
+  - `FavoritesSync`: every rule in §5.2, incl. skipped lists left alone, the plugin's own label changed to a new color, a label the user set themselves (skipped), conflicting colors from two lists, removal only for lists chosen this run, a list that disappeared, and incomplete `latest`. D32: kinds planned independently, Override replacing a user value (`replaced`), Override winning a conflict, two Override lists conflicting, `forget` instead of `remove` for a replaced value, a Reject flag kept without Override, and choices saved as `favoritesColors` read as label marks.
   - `PhotoOrder`: capture order, ties, missing capture times, photos the plugin didn't upload; Lightroom sequence order; the setting's mode.
   - `Fingerprint`: same inputs in a different table order give the same value; any change to a develop value, orientation or render setting gives a different one; float noise below the rounding doesn't.
 
