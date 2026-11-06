@@ -121,6 +121,50 @@ function TestGallerySettings:testPhotoLimitIsBetweenOneAndThePhotoCount()
 	lu.assertEquals({ GallerySettings.check(limit, 1, { photos_count = 0 }) }, { true, 1 })
 end
 
+function TestGallerySettings:testPhotoLimitHasNoMaximumBeforeTheGalleryExists()
+	local limit
+	for _, f in ipairs(GallerySettings.FIELDS) do
+		if f.key == 'limit_favorites' then limit = f end
+	end
+	lu.assertEquals({ GallerySettings.check(limit, 50, {}) }, { true, 50 })
+	lu.assertFalse((GallerySettings.check(limit, 0, {})))
+end
+
+function TestGallerySettings:testNewGalleryDefaults()
+	local props = GallerySettings.newGalleryProps('2026-11-06')
+	lu.assertEquals(props, GallerySettings.normalize {
+		date = '2026-11-06',
+		top_button_enabled = true, allow_caption = true,
+		allow_all_photos = true, allow_empty_folders = true,
+		allow_download = true,
+		is_public = true,
+	})
+	lu.assertEquals(GallerySettings.accessMode(props), 'public')
+end
+
+function TestGallerySettings:testNewGalleryChangesSendEveryShownValue()
+	local edited = GallerySettings.newGalleryProps('2026-11-06')
+	edited.name = 'From the dialog'
+	edited.face_grouping_enabled = true
+	edited.slug = 'my-wedding'
+	local changes = GallerySettings.newGalleryChanges(edited)
+	-- Every field with a value, so the gallery matches the dialog.
+	lu.assertEquals(changes.allow_tutorial, false)
+	lu.assertEquals(changes.allow_download, true)
+	lu.assertEquals(changes.is_public, true)
+	lu.assertEquals(changes.has_password, false)
+	lu.assertEquals(changes.date, '2026-11-06')
+	lu.assertEquals(changes.slug, 'my-wedding')
+	-- Empty fields keep Gallera's value (unlimited storage, generated address, its language).
+	lu.assertNil(changes.storage_to_date)
+	lu.assertNil(changes.password)
+	lu.assertNil(changes.language)
+	lu.assertNil(changes.limit_favorites)
+	-- The name is the collection's; people recognition is available only on an existing gallery.
+	lu.assertNil(changes.name)
+	lu.assertNil(changes.face_grouping_enabled)
+end
+
 function TestGallerySettings:testCheckAcceptsFieldsWithoutRange()
 	lu.assertEquals({ GallerySettings.check(GallerySettings.FIELDS[1], 'x', {}) }, { true, 'x' })
 end

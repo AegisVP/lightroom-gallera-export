@@ -2,6 +2,7 @@
      rename (§6.6) and delete (§6.7) collections. ]]
 local LrApplication = import 'LrApplication'
 local LrDialogs = import 'LrDialogs'
+local LrFileUtils = import 'LrFileUtils'
 local LrPathUtils = import 'LrPathUtils'
 local LrTasks = import 'LrTasks'
 
@@ -269,6 +270,48 @@ function provider.renamePublishedCollection(publishSettings, info)
 end
 
 -- Deleting (§6.7) -----------------------------------------------------------------------
+
+-- The collection's JPEG folder (D24), removed only if it's empty: the folder the JPEGs were last written to
+-- (jpegFolderPath) and the one a publish would use now (it differs after a rename or a new service folder).
+local function removeEmptyJpegFolder(publishSettings, collection)
+	local folders, seen = {}, {}
+	local function add(path)
+		if type(path) == 'string' and path ~= '' and not seen[path:lower()] then
+			seen[path:lower()] = true
+			folders[#folders + 1] = path
+		end
+	end
+	add(CollectionStore.read(collection).jpegFolderPath)
+	local root = publishSettings.jpegFolder
+	if type(root) ~= 'string' or root == '' then
+		root = LrPathUtils.child(LrPathUtils.getStandardFilePath('pictures'), 'Gallera')
+	end
+	add(LrPathUtils.child(root, Names.safeFolder(collection:getName())))
+	for _, folder in ipairs(folders) do
+		if LrFileUtils.exists(folder) == 'directory' then
+			if LrFileUtils.isEmptyDirectory(folder) then
+				local ok = LrFileUtils.delete(folder)
+				Log.info('delete collection: empty JPEG folder', ok and 'removed' or 'could not be removed')
+			else
+				Log.info('delete collection: JPEG folder not empty; kept')
+			end
+		end
+	end
+end
+
+-- Runs when the user starts deleting collections, before Lightroom's own question, so also for 'Leave on
+-- service' (deletePublishedCollection isn't called then). Empty JPEG folders are removed right away: if the
+-- delete is cancelled, the next publish creates the folder again. nil keeps Lightroom's dialog.
+function provider.shouldDeletePublishedCollection(publishSettings, info)
+	local collections = info and info.collections or {}
+	LrTasks.startAsyncTask(function()
+		for _, collection in ipairs(collections) do
+			local ok, err = LrTasks.pcall(removeEmptyJpegFolder, publishSettings, collection)
+			if not ok then Log.warn('delete collection: JPEG folder check failed:', tostring(err)) end
+		end
+	end)
+	return nil
+end
 
 -- A Gallera failure is reported in a dialog, not raised. The trash call is never retried (DESIGN §8):
 -- a second DELETE deletes the gallery permanently.

@@ -106,13 +106,46 @@ function GallerySettings.choiceItems(field, current)
 	return items
 end
 
--- Checks a dialog value against the field's range (min, and maxKey read from the gallery object).
--- Returns ok, value, message: the edit_field 'validate' contract.
+-- What the website gives a new gallery (per the user, 2026-11-06). The create call takes only a name and a
+-- date, so the dialog shows these and Gallera gets them right after the create. A field missing here is
+-- off (bools) or empty (kept as Gallera sets it: storage_to_date empty = unlimited, the generated slug, the
+-- account's language).
+GallerySettings.NEW_GALLERY = {
+	top_button_enabled = true,
+	allow_caption = true,
+	allow_all_photos = true,
+	allow_empty_folders = true,
+	allow_download = true,
+	is_public = true,   -- access is public or password: public unless Password access is chosen
+}
+
+-- The dialog's props for a gallery that doesn't exist yet.
+function GallerySettings.newGalleryProps(date)
+	local props = { date = date }
+	for k, v in pairs(GallerySettings.NEW_GALLERY) do props[k] = v end
+	return GallerySettings.normalize(props)
+end
+
+-- The fields to save on a gallery just created from the dialog: every value shown, so the gallery matches
+-- the dialog. Empty fields are left as Gallera set them. The name is the collection's (sent on create), and
+-- fields with an availableKey can't be known before the gallery exists.
+function GallerySettings.newGalleryChanges(edited)
+	local changes = {}
+	for _, f in ipairs(GallerySettings.FIELDS) do
+		if f.key ~= 'name' and not f.availableKey and edited[f.key] ~= nil then changes[f.key] = edited[f.key] end
+	end
+	return changes
+end
+
+-- Checks a dialog value against the field's range (min, and maxKey read from the gallery object; no maximum
+-- when the gallery has no such value, e.g. before it exists). Returns ok, value, message: the edit_field
+-- 'validate' contract.
 function GallerySettings.check(field, value, gallery)
 	if field.min == nil and field.maxKey == nil then return true, value end
 	local n = tonumber(value)
 	local min = field.min or 0
-	local max = field.maxKey and math.max(tonumber(gallery and gallery[field.maxKey]) or 0, min)
+	local limit = field.maxKey and tonumber(gallery and gallery[field.maxKey])
+	local max = limit and math.max(limit, min)
 	if n and n >= min and (max == nil or n <= max) then return true, n end
 	local range = max and (min .. ' to ' .. max) or ('at least ' .. min)
 	return false, value, field.label .. ' must be ' .. range .. '.'

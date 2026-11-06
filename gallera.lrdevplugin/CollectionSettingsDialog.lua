@@ -6,7 +6,9 @@
      Note: 'visible' bindings don't work in these dialogs (Task 12 finding); controls use 'enabled'. ]]
 local LrApplication = import 'LrApplication'
 local LrDialogs = import 'LrDialogs'
+local LrFileUtils = import 'LrFileUtils'
 local LrHttp = import 'LrHttp'
+local LrPathUtils = import 'LrPathUtils'
 local LrTasks = import 'LrTasks'
 local LrView = import 'LrView'
 
@@ -54,6 +56,8 @@ local function refreshEnabled(cs)
 		local on = cs.ui_loaded == true
 		if field.requires then on = on and cs[gkey(field.requires)] == true end
 		if field.availableKey then on = on and cs.ui_faceAvailable == true end
+		-- A new gallery takes the collection's name.
+		if field.key == 'name' and cs.ui_creating == true then on = false end
 		cs[enabledKey(field)] = on
 	end
 end
@@ -80,6 +84,30 @@ local function fillFields(cs, gallery)
 	cs.ui_galleryName = type(gallery.name) == 'string' and gallery.name or ''
 	cs.ui_publicUrl = type(gallery.public_url) == 'string' and gallery.public_url or ''
 	return props
+end
+
+-- Create mode: the fields show the new-gallery defaults and are editable; on OK they're saved to the new
+-- gallery right after it's created (GallerySettings.newGalleryChanges).
+local function fillNewGallery(cs, name)
+	session.creating = true
+	cs.ui_creating = true
+	local props = GallerySettings.newGalleryProps(os.date('%Y-%m-%d'))
+	props.name = name
+	for _, f in ipairs(GallerySettings.FIELDS) do
+		local v = props[f.key]
+		if v == nil and f.type ~= 'number' then v = '' end
+		if f.type == 'choice' then
+			-- Empty = not sent: Gallera picks the language (probably the account's).
+			local items = GallerySettings.choiceItems(f, nil)
+			table.insert(items, 1, { title = 'Gallera default', value = '' })
+			cs[itemsKey(f)] = items
+		end
+		cs[gkey(f.key)] = v
+	end
+	cs.ui_faceAvailable = false
+	cs.ui_photoCount = nil   -- no photos yet: the photo limit has no maximum
+	cs.ui_access = GallerySettings.accessMode(props)
+	setLoaded(cs, true, "These settings are applied to the new gallery. Its name is the collection's name.")
 end
 
 local function editedProps(cs)
@@ -149,9 +177,16 @@ local function loadLinkPicker(cs, api, info)
 	cs.ui_linkStatus = #items == 0 and 'No unlinked galleries on Gallera.' or ''
 end
 
-local function onLinkChoice(cs, api)
+local function onLinkChoice(cs, api, name)
 	cs.ui_linkEnabled = cs.link_mode == 'link'
-	if cs.link_mode == 'link' and tonumber(cs.link_id) then
+	if cs.link_mode ~= 'link' then
+		session.galleryId = nil
+		session.baseline = nil
+		return fillNewGallery(cs, name)
+	end
+	session.creating = false
+	cs.ui_creating = false
+	if tonumber(cs.link_id) then
 		session.galleryId = tonumber(cs.link_id)
 		session.baseline = nil
 		local galleryId = session.galleryId
@@ -159,9 +194,31 @@ local function onLinkChoice(cs, api)
 	else
 		session.galleryId = nil
 		session.baseline = nil
-		setLoaded(cs, false, cs.link_mode == 'link' and 'Pick a gallery to link.'
-			or 'The gallery settings can be edited after the gallery is created.')
+		setLoaded(cs, false, 'Pick a gallery to link.')
 	end
+end
+
+-- The SDK has no clipboard API: write the text to a temp file (no trailing newline) and pipe it into the
+-- system tool (clip on Windows, pbcopy on macOS). Async, because LrTasks.execute yields.
+local function copyToClipboard(text)
+	LrTasks.startAsyncTask(function()
+		local path = LrPathUtils.child(LrPathUtils.getStandardFilePath('temp'), 'gallera-address.txt')
+		local file = io.open(path, 'wb')
+		if not file then
+			Log.warn('copy address: cannot write temp file')
+			return LrDialogs.showBezel('Could not copy the address')
+		end
+		file:write(text)
+		file:close()
+		local status = LrTasks.execute((WIN_ENV and 'clip < "%s"' or 'pbcopy < "%s"'):format(path))
+		LrFileUtils.delete(path)
+		if status == 0 then
+			LrDialogs.showBezel('Address copied')
+		else
+			Log.warn('copy address: clipboard tool exited with', status)
+			LrDialogs.showBezel('Could not copy the address')
+		end
+	end)
 end
 
 -- View -------------------------------------------------------------------------
@@ -182,6 +239,13 @@ local function galleryView(f, cs, linked)
 					enabled = bind 'ui_loaded',
 					action = function()
 						if cs.ui_publicUrl and cs.ui_publicUrl ~= '' then LrHttp.openUrlInBrowser(cs.ui_publicUrl) end
+					end,
+				},
+				f:push_button {
+					title = 'Copy address',
+					enabled = bind 'ui_loaded',
+					action = function()
+						if cs.ui_publicUrl and cs.ui_publicUrl ~= '' then copyToClipboard(cs.ui_publicUrl) end
 					end,
 				},
 			},
@@ -328,11 +392,10 @@ function CollectionSettingsDialog.viewForCollectionSettings(f, publishSettings, 
 		cs.ui_linkItems = {}
 		cs.ui_linkEnabled = false
 		cs.ui_linkStatus = ''
-		setLoaded(cs, false, 'The gallery settings can be edited after the gallery is created.')
 		if api then
 			LrTasks.startAsyncTask(function() loadLinkPicker(cs, api, info) end)
-			cs:addObserver('link_mode', function() onLinkChoice(cs, api) end)
-			cs:addObserver('link_id', function() onLinkChoice(cs, api) end)
+			cs:addObserver('link_mode', function() onLinkChoice(cs, api, info.name) end)
+			cs:addObserver('link_id', function() onLinkChoice(cs, api, info.name) end)
 		else
 			cs.ui_linkStatus = Auth.LOGIN_MESSAGE
 		end
@@ -345,7 +408,7 @@ function CollectionSettingsDialog.viewForCollectionSettings(f, publishSettings, 
 		for k, v in pairs(GallerySettings.accessChanges(current, cs.ui_access)) do cs[gkey(k)] = v end
 	end)
 
-	return f:column {
+	local view = f:column {
 		bind_to_object = cs,
 		spacing = f:control_spacing(),
 		fill_horizontal = 1,
@@ -358,6 +421,11 @@ function CollectionSettingsDialog.viewForCollectionSettings(f, publishSettings, 
 		},
 		pluginView(f, collection),
 	}
+	-- After the view is built: fieldView sets the popups' items, and Create mode adds its own.
+	if not galleryId then
+		if api then fillNewGallery(cs, info.name) else setLoaded(cs, false, Auth.LOGIN_MESSAGE) end
+	end
+	return view
 end
 
 -- Save --------------------------------------------------------------------------
@@ -369,7 +437,7 @@ local function clearDialogKeys(cs)
 		cs[itemsKey(f)] = nil
 	end
 	for _, k in ipairs { 'ui_loaded', 'ui_status', 'ui_galleryName', 'ui_publicUrl', 'ui_faceAvailable', 'ui_photoCount',
-		'ui_access', 'ui_linkItems', 'ui_linkEnabled', 'ui_linkStatus', 'link_mode', 'link_id' } do
+		'ui_access', 'ui_creating', 'ui_linkItems', 'ui_linkEnabled', 'ui_linkStatus', 'link_mode', 'link_id' } do
 		cs[k] = nil
 	end
 end
@@ -465,7 +533,11 @@ local function update(publishSettings, info)
 	end
 
 	local newName
-	if api and s.baseline and s.galleryId == galleryId then
+	if api and s.creating and cs.link_mode ~= 'link' and not linkedGallery then
+		-- Just created: the create call takes only name and date, so save every value the dialog showed.
+		local changes = GallerySettings.newGalleryChanges(editedProps(cs))
+		if next(changes) then saveChanges(api, galleryId, changes, collection) end
+	elseif api and s.baseline and s.galleryId == galleryId then
 		local changed = GallerySettings.diff(s.baseline, editedProps(cs))
 		if next(changed) then newName = saveChanges(api, galleryId, changed, collection) end
 	end

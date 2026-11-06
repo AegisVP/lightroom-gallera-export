@@ -24,7 +24,7 @@ A personal-use Lightroom Classic plugin that publishes finished photos as JPEGs 
 
 ### In the PoC
 - A publish service: one published collection maps to one Gallera gallery.
-- Create a new gallery (Gallera defaults) or link an existing one.
+- Create a new gallery (with the Settings fields set in the dialog) or link an existing one.
 - Publish, re-publish (delete + upload), remove photos, rename the collection → rename the gallery, delete the collection (asks what to do with the gallery).
 - The gallery **Settings** tab (5 sections), edited from the collection settings dialog. **Gallera is the source of truth.**
 - JPEG rendering from the service's export settings, with a per-collection override of long edge size and JPEG quality.
@@ -67,7 +67,7 @@ All are documented in `docs/gallera-api.md` unless noted.
 | D2 | One collection = one gallery. No collection sets in the PoC; the model leaves room for scenes | Keeps the PoC simple; the next iteration adds scenes |
 | D3 | Gallera is the source of truth for gallery settings. They're loaded fresh when the dialog opens and saved on OK as a merge of only the changed fields. Publishing never pushes settings | No conflicts with changes made on the website |
 | D4 | Settings tab only (General, Scenes, Favorites, Saving, Access). The Design tab is excluded but round-tripped untouched | Design needs a visual preview; possible future version |
-| D5 | New galleries are created empty with Gallera's defaults (no template copy) | User choice |
+| D5 | New galleries are created empty (no template copy). In Create mode the Settings fields are editable and start from the website's new-gallery defaults (`GallerySettings.NEW_GALLERY`); every shown value is saved right after the create, so the gallery matches the dialog. Empty fields (address, language, Available until, passwords, email) keep Gallera's value | User choice (2026-11-06: settings at creation, fixed defaults, send all) |
 | D6 | Re-publish = upload new, **then** delete old | A failure never leaves a gap in the gallery |
 | D7 | Removing photos from the collection deletes them from the gallery on publish | Standard publish behavior |
 | D8 | Deleting a collection: Lightroom asks whether to delete from the service. Its delete choice calls the plugin, which moves an **active** gallery to Gallera's deleted galleries (restorable on the website) without asking again; **Leave on service** doesn't call the plugin and keeps the gallery. The plugin never sends a second delete | User choice; protects against D-constraint 3. The plugin's own Delete gallery / Keep gallery question was removed (2026-10-31): it repeated Lightroom's | User choice; protects against D-constraint 3 |
@@ -81,7 +81,7 @@ All are documented in `docs/gallera-api.md` unless noted.
 | D16 | Favorites are matched by **recorded Gallera photo id**. Filenames are never changed; `lightroom_list` filename matching is a fallback only | Ids are exact; filenames are kept for human readability and the fallback |
 | D17 | The Client favorites dialog opens from **Library > Plug-in Extras > Gallera client favorites…**. After a publish, if any list is new or has changed since the last review (by `items_count` / `is_finished`), the plugin asks "Client favorites changed (list 'vv'). Review now?" Yes opens the dialog | The dialog is offered when it's relevant, but nothing is applied without it |
 | D22 | **Originals are never modified or deleted.** The only things the plugin changes in the catalog: color labels (D14), its own hidden metadata field, Lightroom's publish records, and the published collection's name, remote id and settings. What happens to rendered JPEGs is a service setting (D24) | User requirement |
-| D24 | JPEGs are **kept by default**. Every rendered JPEG goes to `<folder>\<collection name>\`, where the folder defaults to `Pictures\Gallera` (`LrPathUtils.getStandardFilePath('pictures')`). A re-rendered photo overwrites its earlier JPEG. Service setting **Uploaded JPEGs**: **Keep, ask to remove after publish** (default) / **Always keep** / **Always remove after upload**. Only successfully uploaded JPEGs are ever removed; failed ones are always kept. Each collection can override it: **Uploaded JPEGs** = **Service setting** (default) / Keep, ask to remove / Always keep / Always remove after upload (`PublishPlan.jpegHandling`) | User choice: the files are kept unless the user says otherwise; per-collection choice added 2026-10-31 |
+| D24 | JPEGs are **kept by default**. Deleting a collection removes its JPEG folder only if the folder is empty, from `shouldDeletePublishedCollection` (before Lightroom's question, so also for Leave on service; a cancelled delete loses only an empty folder, which the next publish creates again). Every rendered JPEG goes to `<folder>\<collection name>\`, where the folder defaults to `Pictures\Gallera` (`LrPathUtils.getStandardFilePath('pictures')`). A re-rendered photo overwrites its earlier JPEG. Service setting **Uploaded JPEGs**: **Keep, ask to remove after publish** (default) / **Always keep** / **Always remove after upload**. Only successfully uploaded JPEGs are ever removed; failed ones are always kept. Each collection can override it: **Uploaded JPEGs** = **Service setting** (default) / Keep, ask to remove / Always keep / Always remove after upload (`PublishPlan.jpegHandling`) | User choice: the files are kept unless the user says otherwise; per-collection choice added 2026-10-31 |
 | D25 | Failed uploads: each photo gets **up to 3 attempts** within a publish (on `network` errors, and on a PUT to an expired or rejected signed URL), waiting 2 s then 5 s, with a fresh signed URL each time. After that, the photo is reported failed (`rendition:uploadFailed`) and stays in Lightroom's publish queue. **Publish again** retries it; Lightroom re-renders from the original | Lightroom's standard retry is a manual re-publish; automatic attempts cover brief network problems |
 | D23 | Storage: before uploading, compare the estimated publish size with free Gallera storage. If it may not fit, warn with **Continue anyway** / **Cancel**. During upload, stop when the next file truly doesn't fit | User choice |
 | D18 | Rendering: JPEG only. The service holds the full Lightroom export settings. Each collection can override **long edge** and **JPEG quality**. Mechanism (S1 variant A): in `processRenderedPhotos`, before the first `exportContext:renditions()` call, write the override's `LR_size_*` / `LR_jpeg_quality` into `exportContext.propertyTable`, and restore the saved values when the loop ends (also on error) | User choice; proven by spike S1 |
@@ -278,7 +278,7 @@ Gallera's own settings may also end up in collection settings, because the dialo
 ### 6.2 Creating or linking a collection (`updateCollectionSettings` on first OK)
 1. **Create new:**
    - `createGallery{ name = collection name, date = today }`, then `getGallery(slug)` to get the id.
-   - If the user edited any Settings fields in the dialog, `apply` + `saveGallery`.
+   - Then `newGalleryChanges` (every non-empty dialog field except Name and People recognition) → `apply` + `saveGallery`. If that save fails, the gallery stays created and linked, and the dialog says the settings weren't saved.
 2. **Link existing:** the picker (`listGalleryNames`, minus galleries already linked to another collection of this service) supplies the id. The dialog's Settings fields were already loaded from that gallery. The collection is renamed to the gallery's name (D26).
 3. `setRemoteId(id)` and `setRemoteUrl(public_url)` on the published collection.
 
@@ -417,8 +417,8 @@ Entry points: the **Gallera client favorites…** menu item (for the selected pu
 
 ### 7.2 Collection settings dialog
 **Gallery** (top)
-- First creation: radio **Create new gallery** / **Link existing gallery** (a popup of galleries).
-- After that: the gallery name, its public URL, and **Open in browser**.
+- First creation: radio **Create new gallery** / **Link existing gallery** (a popup of galleries). Create: the Settings fields show the new-gallery defaults and are editable (Name follows the collection; People recognition can be set once the gallery exists; Language offers "Gallera default"). Link: the fields load from the picked gallery.
+- After that: the gallery name, its public URL, **Open in browser** and **Copy address** (the SDK has no clipboard API, so it pipes a temp file into `clip`).
 
 **Gallera Settings tab**: loaded fresh (D3) and laid out like the website.
 

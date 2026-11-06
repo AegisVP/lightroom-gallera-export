@@ -23,7 +23,7 @@ Before you start:
 
 | # | Do | Expect |
 |---|---|---|
-| 2.1 | Create a collection with **Create new gallery** | The gallery appears on the website with that name; Edit Collection shows its address |
+| 2.1 | Create a collection with **Create new gallery**, change a few Settings fields first | The Settings fields are editable and start from the new-gallery defaults ("Up" button, Filename, Show all photos, Empty scenes, Download on, Public access; the rest off). The gallery appears on the website with that name and exactly the dialog's settings; Edit Collection shows its address |
 | 2.2 | Create a collection with **Link existing gallery** | After ~1 s the collection takes the gallery's name (D26). A gallery already linked to another collection isn't in the picker |
 | 2.3 | Edit Collection | "Loading from Gallera…", then the Settings fields fill in |
 | 2.4 | Change a field in each section (General, Scenes, Favorites, Saving, Access), OK | The website shows each change; the gallery's design is unchanged |
@@ -71,6 +71,7 @@ drawn narrow with the name cropped until the panel is resized. The plugin doesn'
 | 5.2 | Delete a photo on the website, then remove it in Lightroom, Publish | The record disappears without an error |
 | 5.3 | Delete a collection; in Lightroom's dialog choose **Leave on service** | The plugin isn't asked; the gallery stays on Gallera |
 | 5.4 | Delete a collection; choose Lightroom's delete-from-service option | No second question; the gallery is in the website's deleted galleries (trash), not permanently deleted |
+| 5.5 | Publish with **Always remove after upload** (folder ends up empty), then delete the collection: once with **Leave on service**, once with delete-from-service. Repeat with JPEGs kept | The empty `<folder>\<collection name>` folder is removed in both cases (log: "empty JPEG folder removed"), as soon as Lightroom's question appears; a folder with JPEGs in it is kept |
 
 ## 6. Order on Gallera
 
